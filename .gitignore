@@ -1,0 +1,63 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# Dependencies
+node_modules/
+/.pnpm-store
+
+# Build outputs
+/dist
+/dist-ssr
+
+# Logging
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor directories and files
+.idea
+.vscode
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Cypress
+/cypress/videos/
+/cypress/screenshots/
+
+# Vue
+*.tsbuildinfo
+*.vue.js
+
+# uploads
+express-project/uploads/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+
+# AI 服务运行时数据（可由 init_knowledge.py 重建）
+ai-service/chroma_data/
+
+# Debug
+.dbg/
+
+doc/

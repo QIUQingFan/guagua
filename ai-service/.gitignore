@@ -1,0 +1,64 @@
+# ── 密钥与本地环境──
+.env
+.env.local
+.env.*.local
+
+# ── Python ──
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# ── 虚拟环境 ──
+venv/
+env/
+ENV/
+.venv/
+.env/
+
+# ── 测试与覆盖率 ──
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.pytest_cache/
+.mypy_cache/
+
+# ── IDE ──
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ── 日志与临时文件 ──
+*.log
+logs/
+tmp/
+
+# ── 向量库本地持久化──
+chroma_db/
+.chroma/
+*.duckdb
+
+# ── 操作系统 ──
+.DS_Store
+Thumbs.db

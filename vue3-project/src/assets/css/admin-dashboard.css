@@ -1,0 +1,329 @@
+/* 管理后台数据面板共享样式 */
+
+/* ===== 页面容器 ===== */
+.admin-page {
+  padding: var(--space-lg) var(--space-xl);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+  animation: fadeSlide 0.25s ease;
+}
+
+/* ===== 区块卡片 ===== */
+.section-card {
+  background: var(--card-bg);
+  border: var(--card-border);
+  border-radius: var(--card-radius);
+  padding: var(--card-padding);
+  box-shadow: var(--shadow-card);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.section-card .card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  margin-bottom: var(--space-md);
+}
+
+.section-card .card-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-color-primary);
+  margin: 0;
+  letter-spacing: 0.01em;
+}
+
+.section-card .card-meta {
+  font-size: 12px;
+  color: var(--text-color-tertiary);
+}
+
+/* ===== 指标卡片网格 ===== */
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--space-md);
+}
+
+.metric-card {
+  background: var(--card-bg);
+  border: var(--card-border);
+  border-radius: var(--card-radius);
+  padding: var(--space-md) var(--space-lg);
+  box-shadow: var(--shadow-card);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.metric-card:hover {
+  border-color: var(--border-color-secondary);
+  box-shadow: var(--shadow-elevated);
+  transform: translateY(-1px);
+}
+
+.metric-label {
+  font-size: var(--metric-label-fs);
+  color: var(--text-color-tertiary);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+.metric-value {
+  font-size: var(--metric-value-fs);
+  font-weight: 700;
+  color: var(--text-color-primary);
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+
+.metric-delta {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--series-neutral);
+  font-variant-numeric: tabular-nums;
+}
+
+.metric-delta.up {
+  color: var(--series-positive);
+}
+
+.metric-delta.down {
+  color: var(--series-negative);
+}
+
+/* ===== 图表卡片 ===== */
+.charts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: var(--space-md);
+}
+
+.chart-card {
+  background: var(--card-bg);
+  border: var(--card-border);
+  border-radius: var(--card-radius);
+  padding: var(--card-padding);
+  box-shadow: var(--shadow-card);
+}
+
+.chart-card .card-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-color-primary);
+  margin: 0 0 var(--space-md) 0;
+}
+
+.chart-box {
+  width: 100%;
+  height: 280px;
+}
+
+/* ===== 数据表格 ===== */
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.data-table thead th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--text-color-tertiary);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-color-primary);
+  background: var(--bg-color-secondary);
+  white-space: nowrap;
+}
+
+.data-table tbody td {
+  padding: 11px 12px;
+  border-bottom: 1px solid var(--border-color-secondary);
+  color: var(--text-color-secondary);
+}
+
+.data-table tbody tr {
+  transition: background-color 0.15s ease;
+}
+
+.data-table tbody tr:hover {
+  background: var(--bg-color-secondary);
+}
+
+.data-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+/* ===== 筛选条 ===== */
+.filter-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+}
+
+.filter-bar .range-select,
+.filter-bar .filter-input {
+  height: 34px;
+  padding: 0 12px;
+  font-size: 13px;
+  color: var(--text-color-primary);
+  background: var(--card-bg);
+  border: 1px solid var(--border-color-primary);
+  border-radius: 8px;
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.filter-bar .range-select:focus,
+.filter-bar .filter-input:focus {
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 3px var(--nav-active-bg);
+}
+
+/* ===== 状态标签 ===== */
+.status-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.status-tag.positive {
+  background: rgba(16, 185, 129, 0.12);
+  color: var(--series-positive);
+}
+
+.status-tag.negative {
+  background: rgba(239, 68, 68, 0.12);
+  color: var(--series-negative);
+}
+
+.status-tag.neutral {
+  background: var(--bg-color-secondary);
+  color: var(--text-color-secondary);
+}
+
+.status-tag.primary {
+  background: var(--nav-active-bg);
+  color: var(--primary-color);
+}
+
+/* ===== 空状态 ===== */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 40px 20px;
+  color: var(--text-color-quaternary);
+  font-size: 13px;
+  text-align: center;
+}
+
+.empty-state .empty-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-color-tertiary);
+}
+
+/* ===== 骨架屏 ===== */
+.skeleton-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 0;
+}
+
+.skeleton-line {
+  height: 12px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--bg-color-secondary) 25%, var(--bg-color-tertiary) 37%, var(--bg-color-secondary) 63%);
+  background-size: 400% 100%;
+  animation: skeletonShimmer 1.4s ease infinite;
+}
+
+.skeleton-line:nth-child(odd) {
+  width: 100%;
+}
+
+.skeleton-line:nth-child(even) {
+  width: 75%;
+}
+
+@keyframes skeletonShimmer {
+  0% {
+    background-position: 100% 50%;
+  }
+
+  100% {
+    background-position: 0 50%;
+  }
+}
+
+/* ===== 路由切换过渡 ===== */
+@keyframes fadeSlide {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.fade-slide-enter-active,
+.fade-slide-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.fade-slide-enter-from {
+  opacity: 0;
+  transform: translateY(6px);
+}
+
+.fade-slide-leave-to {
+  opacity: 0;
+  transform: translateY(-6px);
+}
+
+/* ===== 响应式降列 ===== */
+@media (max-width: 1280px) {
+  .charts-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 960px) {
+  .admin-page {
+    padding: var(--space-md);
+  }
+
+  .metrics-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 560px) {
+  .metrics-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .metric-value {
+    font-size: 22px;
+  }
+}
