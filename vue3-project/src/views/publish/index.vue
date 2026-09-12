@@ -816,16 +816,9 @@ const handleSaveDraft = async () => {
   color: var(--text-color-primary);
   padding-bottom: calc(48px + constant(safe-area-inset-bottom));
   padding-bottom: calc(48px + env(safe-area-inset-bottom));
-  margin: 72px auto;
+  margin: 72px 0;
   width: 100%;
-  max-width: 700px;
   transition: background-color 0.2s ease;
-}
-
-@media (min-width: 961px) {
-  .publish-container {
-    max-width: 1000px;
-  }
 }
 
 .publish-header {
@@ -836,7 +829,7 @@ const handleSaveDraft = async () => {
   background: var(--bg-color-primary);
   border-bottom: 1px solid var(--border-color-primary);
   position: sticky;
-  top: 0;
+  top: 72px;
   z-index: 100;
   transition: background-color 0.2s ease,border-color 0.2s ease;
 }
@@ -972,8 +965,6 @@ const handleSaveDraft = async () => {
 
 .publish-content {
   padding: 1rem;
-  max-width: 600px;
-  margin: 0 auto;
   background-color: var(--bg-color-primary);
   transition: background-color 0.2s ease;
 }

@@ -8,20 +8,20 @@ const path = require('path');
 require('dotenv').config({ path: path.resolve(__dirname, '..', '.env') });
 
 const config = {
-  
+
   server: {
     port: process.env.PORT || 3001,
     env: process.env.NODE_ENV || 'development'
   },
 
-  
+
   jwt: {
     secret: process.env.JWT_SECRET || 'guagua_secret_key_2025',
     expiresIn: process.env.JWT_EXPIRES_IN || '7d',
     refreshExpiresIn: process.env.REFRESH_TOKEN_EXPIRES_IN || '30d'
   },
 
-  
+
   database: {
     host: process.env.DB_HOST || 'localhost',
     user: process.env.DB_USER || 'root',
@@ -32,84 +32,97 @@ const config = {
     timezone: '+08:00'
   },
 
-  
+
   upload: {
-    
+
     image: {
       maxSize: process.env.IMAGE_MAX_SIZE || '10mb',
       allowedTypes: ['image/jpeg', 'image/png', 'image/gif', 'image/webp'],
-      
+
       strategy: process.env.IMAGE_UPLOAD_STRATEGY || 'oss',
-      
+
       local: {
         uploadDir: process.env.IMAGE_LOCAL_UPLOAD_DIR || 'uploads/images',
         baseUrl: process.env.LOCAL_BASE_URL || 'http://localhost:3001'
       },
-      
+
       r2: {
         accountId: process.env.R2_ACCOUNT_ID,
         accessKeyId: process.env.R2_ACCESS_KEY_ID,
         secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
         bucketName: process.env.R2_BUCKET_NAME,
         endpoint: process.env.R2_ENDPOINT,
-        publicUrl: process.env.R2_PUBLIC_URL, 
+        publicUrl: process.env.R2_PUBLIC_URL,
         region: process.env.R2_REGION || 'auto'
       },
-      
+
       oss: {
         accessKeyId: process.env.OSS_ACCESS_KEY_ID,
         accessKeySecret: process.env.OSS_ACCESS_KEY_SECRET,
         bucket: process.env.OSS_BUCKET,
         region: process.env.OSS_REGION || 'oss-cn-hangzhou',
         endpoint: process.env.OSS_ENDPOINT || 'https://oss-cn-hangzhou.aliyuncs.com',
-        customDomain: process.env.OSS_CUSTOM_DOMAIN 
+        customDomain: process.env.OSS_CUSTOM_DOMAIN
       }
     },
-    
+
     video: {
       maxSize: process.env.VIDEO_MAX_SIZE || '100mb',
       allowedTypes: ['video/mp4', 'video/avi', 'video/mov', 'video/wmv', 'video/flv', 'video/webm'],
-      
-      strategy: process.env.VIDEO_UPLOAD_STRATEGY || 'local', 
-      
+
+      strategy: process.env.VIDEO_UPLOAD_STRATEGY || 'local',
+
       local: {
         uploadDir: process.env.VIDEO_LOCAL_UPLOAD_DIR || 'uploads/videos',
         baseUrl: process.env.LOCAL_BASE_URL || 'http://localhost:3001'
       },
-      
+
       oss: {
         accessKeyId: process.env.OSS_ACCESS_KEY_ID,
         accessKeySecret: process.env.OSS_ACCESS_KEY_SECRET,
         bucket: process.env.OSS_BUCKET,
         region: process.env.OSS_REGION || 'oss-cn-hangzhou',
         endpoint: process.env.OSS_ENDPOINT || 'https://oss-cn-hangzhou.aliyuncs.com',
-        customDomain: process.env.OSS_CUSTOM_DOMAIN 
+        customDomain: process.env.OSS_CUSTOM_DOMAIN
       }
     }
   },
 
-  
+
   api: {
     baseUrl: process.env.API_BASE_URL || 'http://localhost:3001',
     timeout: 30000
   },
 
-  
+
   pagination: {
     defaultLimit: 20,
     maxLimit: 100
   },
 
-  
+
   cache: {
-    ttl: 300 
+    ttl: 300
   },
 
-  
+
   aiService: {
     url: process.env.AI_SERVICE_URL || 'http://127.0.0.1:8085',
     timeout: 60000,
-    enabled: process.env.AI_SERVICE_ENABLED !== 'false' 
+    enabled: process.env.AI_SERVICE_ENABLED !== 'false'
+  },
+
+
+  alipay: {
+    enabled: process.env.ALIPAY_ENABLED === 'true',
+    sandbox: process.env.ALIPAY_SANDBOX === 'true',
+    appId: process.env.ALIPAY_APP_ID || '',
+    privateKey: process.env.ALIPAY_PRIVATE_KEY || '',
+    alipayPublicKey: process.env.ALIPAY_PUBLIC_KEY || '',
+    signType: 'RSA2',
+    notifyUrl: process.env.ALIPAY_NOTIFY_URL || 'http://localhost:3001/api/alipay/notify',
+    returnUrl: process.env.ALIPAY_RETURN_URL || 'http://localhost:3001/api/alipay/return',
+    frontendUrl: process.env.FRONTEND_BASE_URL || 'http://localhost:5173'
   }
 };
 

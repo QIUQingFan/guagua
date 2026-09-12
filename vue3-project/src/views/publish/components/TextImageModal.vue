@@ -154,7 +154,7 @@ const strokeColor = ref('#ffffff')
 
 const loadTemplates = async () => {
   try {
-    const frameModules = import.meta.glob('../../../../assets/frames/*.(jpg|jpeg|png|gif|webp)', { eager: true })
+    const frameModules = import.meta.glob('../../../assets/frames/*.(jpg|jpeg|png|gif|webp)', { eager: true })
 
     const templateList = []
     let index = 1

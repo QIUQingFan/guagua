@@ -119,15 +119,37 @@ async function handleConfirm(order, e) {
     }
 }
 
-function handlePay(order, e) {
+async function handlePay(order, e) {
     e.stopPropagation()
-    showShopMessage('在线支付功能开发中，敬请期待', 'info')
+    showShopMessage('正在生成支付链接...', 'info')
+    const res = await orderStore.pay(order.order_no)
+    if (res.success && res.data?.pay_url) {
+        window.open(res.data.pay_url, '_blank')
+        showShopMessage('已在新窗口打开支付宝收银台', 'success')
+    } else {
+        showShopMessage(res.message || '发起支付失败', 'error')
+    }
+}
+
+async function handleRefund(order, e) {
+    e.stopPropagation()
+    const reason = prompt(`确定对订单「${order.order_no}」申请全额退款吗？\n退款金额将原路退回您的支付宝账户。\n（可选）填写退款原因：`, '')
+    if (reason === null) return
+    const payload = reason === '' ? {} : { reason }
+    const res = await orderStore.refund(order.order_no, payload)
+    if (res.success) {
+        showShopMessage('退款成功，款项已原路退回', 'success')
+        await loadList(true)
+    } else {
+        showShopMessage(res.message || '退款失败', 'error')
+    }
 }
 
 function onAction(key, order, e) {
     if (key === 'pay') return handlePay(order, e)
     if (key === 'cancel') return handleCancel(order, e)
     if (key === 'confirm') return handleConfirm(order, e)
+    if (key === 'refund') return handleRefund(order, e)
 }
 
 function orderActions(order) {
@@ -137,10 +159,17 @@ function orderActions(order) {
             actions.push({ key: 'pay', label: '去支付', type: 'primary' })
             actions.push({ key: 'cancel', label: '取消订单', type: 'default' })
             break
+        case 'pending_shipment':
+            actions.push({ key: 'refund', label: '申请退款', type: 'default' })
+            break
         case 'shipped':
             actions.push({ key: 'confirm', label: '确认收货', type: 'primary' })
+            actions.push({ key: 'refund', label: '申请退款', type: 'default' })
             break
         case 'completed':
+            if (order.refund_status !== 'refunded') {
+                actions.push({ key: 'refund', label: '申请退款', type: 'default' })
+            }
             break
         default:
             break
@@ -240,6 +269,9 @@ onMounted(() => {
                             <span class="summary-qty">共 {{ order.total_quantity }} 件</span>
                             <span class="summary-amount">
                                 实付：<em>¥{{ order.pay_amount }}</em>
+                            </span>
+                            <span v-if="order.refund_status === 'refunded'" class="summary-refund">
+                                已退款 ¥{{ order.refund_amount }}
                             </span>
                         </div>
                         <div class="order-actions" v-if="orderActions(order).length">
@@ -497,6 +529,12 @@ onMounted(() => {
     font-size: 17px;
     font-weight: 700;
     font-style: normal;
+}
+
+.summary-refund {
+    font-size: 12px;
+    color: var(--series-warning, #f59e0b);
+    font-weight: 600;
 }
 
 .order-actions {

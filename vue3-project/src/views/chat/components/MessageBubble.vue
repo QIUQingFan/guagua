@@ -63,7 +63,7 @@ const canRecall = computed(() => {
   return (now.value - new Date(props.message.created_at).getTime()) < RECALL_WINDOW_MS
 })
 
-const emit = defineEmits(['retry', 'recall'])
+const emit = defineEmits(['retry', 'recall', 'quote'])
 
 const handleRetry = () => {
   if (props.message.failed) {
@@ -77,6 +77,11 @@ const handleRecall = () => {
   }
 }
 
+const handleQuote = () => {
+  if (props.message.is_recalled || props.message.sending || props.message.failed) return
+  emit('quote', props.message)
+}
+
 
 const handleAvatarClick = () => {
   if (props.isSelf) return
@@ -84,6 +89,30 @@ const handleAvatarClick = () => {
   if (!userId) return
   router.push({ name: 'user_profile', params: { userId } })
 }
+
+const quoteMessage = computed(() => {
+  const quote = props.message.quote
+  if (!quote || !quote.id) return null
+  return quote
+})
+
+/**
+ * 将消息内容安全渲染为 HTML：
+ * 1. 转义所有 HTML 标签，防止 XSS
+ * 2. 保留换行
+ * 3. 高亮 @提及
+ */
+const renderedContent = computed(() => {
+  const content = props.message.content || ''
+  const escapeHtml = (text) => {
+    const div = document.createElement('div')
+    div.textContent = text
+    return div.innerHTML
+  }
+  const escaped = escapeHtml(content)
+  const withBreaks = escaped.replace(/\n/g, '<br>')
+  return withBreaks.replace(/@([^\s@<]+)/g, '<span class="mention">@$1</span>')
+})
 </script>
 
 <template>
@@ -100,7 +129,15 @@ const handleAvatarClick = () => {
     />
     <div class="message-content">
       <div v-if="showNickname && !isSelf" class="message-nickname">{{ senderNickname }}</div>
-      <div class="message-text">{{ message.content }}</div>
+      <div class="message-body">
+        <div class="message-text">
+          <div v-if="quoteMessage" class="quote-block">
+            <div class="quote-sender">{{ quoteMessage.from_nickname || '未知用户' }}</div>
+            <div class="quote-text">{{ quoteMessage.content }}</div>
+          </div>
+          <div v-html="renderedContent"></div>
+        </div>
+      </div>
       <div class="message-meta">
         <span class="message-time">{{ displayTime }}</span>
         <span v-if="statusText" class="message-status" :class="{ failed: message.failed }">
@@ -111,6 +148,9 @@ const handleAvatarClick = () => {
         </button>
         <button v-if="canRecall" class="recall-btn" @click="handleRecall">
           撤回
+        </button>
+        <button class="quote-btn" @click="handleQuote">
+          引用
         </button>
       </div>
     </div>
@@ -165,9 +205,63 @@ const handleAvatarClick = () => {
   padding-left: 4px;
 }
 
+.message-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.message-self .message-body {
+  align-items: flex-end;
+}
+
+.quote-block {
+  margin-bottom: 6px;
+  padding: 4px 8px;
+  border-left: 3px solid rgba(0, 0, 0, 0.12);
+  background: rgba(0, 0, 0, 0.045);
+  border-radius: 4px;
+  max-width: 100%;
+}
+
+.message-self .quote-block {
+  border-left-color: rgba(255, 255, 255, 0.55);
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.quote-sender {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-color-tertiary);
+  margin-bottom: 2px;
+  line-height: 1.4;
+}
+
+.message-self .quote-sender {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.quote-text {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-color-tertiary);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+.message-self .quote-text {
+  color: rgba(255, 255, 255, 0.8);
+}
+
 .message-text {
-  padding: 12px 16px;
-  border-radius: 18px;
+  max-width: 100%;
+  padding: 10px 14px;
+  border-radius: 16px;
   background: var(--bg-color-secondary);
   color: var(--text-color-primary);
   font-size: 14px;
@@ -179,6 +273,15 @@ const handleAvatarClick = () => {
 .message-self .message-text {
   background: var(--primary-color);
   color: #fff;
+}
+
+.message-text :deep(.mention) {
+  color: var(--primary-color);
+  font-weight: 500;
+}
+
+.message-self .message-text :deep(.mention) {
+  color: #ffe58f;
 }
 
 .message-meta {
@@ -213,7 +316,8 @@ const handleAvatarClick = () => {
   opacity: 0.8;
 }
 
-.recall-btn {
+.recall-btn,
+.quote-btn {
   padding: 2px 8px;
   border: none;
   border-radius: 10px;
@@ -224,8 +328,9 @@ const handleAvatarClick = () => {
   transition: color 0.2s;
 }
 
-.recall-btn:hover {
-  color: var(--danger-color);
+.recall-btn:hover,
+.quote-btn:hover {
+  color: var(--primary-color);
 }
 
 .message-recalled {

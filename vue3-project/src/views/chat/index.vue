@@ -109,9 +109,7 @@ watch(() => [route.query.targetId, route.query.userId, route.query.type, route.q
 <style scoped>
 .chat-page {
   padding-top: 72px;
-  margin: 0 auto;
   width: 100%;
-  max-width: 1200px;
   height: calc(100vh - 72px);
   display: flex;
   background: var(--bg-color-primary);

@@ -142,6 +142,7 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   width: 228px;
+  box-sizing: border-box;
   background: var(--bg-color-primary);
   position: fixed;
   z-index: 100;

@@ -34,7 +34,7 @@ const compressImage = (file, maxSizeMB = 0.8, quality = 0.4) => {
       }, file.type, compressQuality)
     }
 
-    img.onerror = () => resolve(file) 
+    img.onerror = () => resolve(file)
     img.src = URL.createObjectURL(file)
   })
 }
@@ -52,7 +52,7 @@ export async function uploadImage(file, options = {}) {
     formData.append('file', compressedFile, filename)
 
     const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 60000) 
+    const timeoutId = setTimeout(() => controller.abort(), 60000)
 
     const response = await fetch('/api/upload/single', {
       method: 'POST',
@@ -151,14 +151,15 @@ export async function uploadImages(files, options = {}) {
 export async function uploadCroppedImage(blob, options = {}) {
   try {
     if (!blob) throw new Error('请选择要上传的文件')
-    
+
     const formData = new FormData()
     const filename = options.filename || 'avatar.png'
     formData.append('file', blob, filename)
 
-    const adminToken = localStorage.getItem('admin_token')
-    const userToken = localStorage.getItem('token')
-    const token = adminToken || userToken
+    const isAdminPage = window.location.pathname.startsWith('/admin')
+    const token = isAdminPage
+      ? localStorage.getItem('admin_token')
+      : localStorage.getItem('token')
 
     if (!token) {
       throw new Error('未登录，请先登录')
@@ -177,7 +178,7 @@ export async function uploadCroppedImage(blob, options = {}) {
     }
 
     const result = await response.json()
-    
+
     if (result.code === 200) {
       return {
         success: true,

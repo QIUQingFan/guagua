@@ -198,9 +198,10 @@ class SocketService {
      * @param {number} toUserId - 接收者ID
      * @param {string} content - 消息内容
      * @param {number} type - 消息类型
+     * @param {Object} options - 附加参数 { quote_message_id, quote }
      */
-    sendPrivateMessage(toUserId, content, type = 1) {
-        return this.emit('private:message', { toUserId, content, type })
+    sendPrivateMessage(toUserId, content, type = 1, options = {}) {
+        return this.emit('private:message', { toUserId, content, type, ...options })
     }
 
     /**
@@ -250,9 +251,10 @@ class SocketService {
      * @param {number} groupId - 群ID
      * @param {string} content - 消息内容
      * @param {number} type - 消息类型
+     * @param {Object} options - 附加参数 { quote_message_id, quote, mentionUserIds }
      */
-    sendGroupMessage(groupId, content, type = 1) {
-        return this.emit('group:message', { groupId, content, type })
+    sendGroupMessage(groupId, content, type = 1, options = {}) {
+        return this.emit('group:message', { groupId, content, type, ...options })
     }
 
     /**

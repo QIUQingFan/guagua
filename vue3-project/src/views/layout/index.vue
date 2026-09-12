@@ -37,7 +37,7 @@ onUnmounted(() => {
   min-width: 320px;
   margin: 0;
   width: 100%;
-  overflow-x: hidden;
+  overflow-x: clip;
   position: relative;
   box-sizing: border-box;
   transition: background-color 0.2s ease;
@@ -52,7 +52,7 @@ onUnmounted(() => {
   min-height: 100vh;
   transition: margin-left 0.3s;
   width: 100%;
-  overflow-x: hidden;
+  overflow-x: clip;
 }
 
 .main-content.with-sidebar {

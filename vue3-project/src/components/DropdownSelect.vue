@@ -19,9 +19,8 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import SvgIcon from '@/components/SvgIcon.vue'
-import { useScrollLock } from '@/composables/useScrollLock'
 
 const props = defineProps({
   options: {
@@ -66,7 +65,6 @@ const props = defineProps({
 const emit = defineEmits(['update:modelValue', 'change'])
 
 const isOpen = ref(false)
-const { lock, unlock } = useScrollLock()
 
 const selectedOption = computed(() => {
   if (!props.modelValue) return null
@@ -123,14 +121,6 @@ const handleClickOutside = (event) => {
     isOpen.value = false
   }
 }
-
-watch(isOpen, (newValue) => {
-  if (newValue) {
-    lock()
-  } else {
-    unlock()
-  }
-})
 
 onMounted(() => {
   document.addEventListener('click', handleClickOutside)

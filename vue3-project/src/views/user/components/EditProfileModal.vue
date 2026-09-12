@@ -15,7 +15,7 @@
             <div class="avatar-upload-container">
               <div class="avatar-upload-area" @click="triggerFileInput" @dragover.prevent @drop.prevent="handleDrop">
                 <div v-if="!uploading" class="avatar-preview">
-                  <img :src="form.avatar" alt="头像" class="avatar-image" v-img-fallback="avatar" />
+                  <img :src="form.avatar" alt="头像" class="avatar-image" v-img-fallback="'avatar'" />
                   <SvgIcon class="overlay-icon" name="edit" width="30" height="30" />
                 </div>
                 <div v-else class="upload-loading">

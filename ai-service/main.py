@@ -3,8 +3,33 @@ from __future__ import annotations
 import asyncio
 import json
 import threading
+import warnings
 from contextlib import asynccontextmanager
 from typing import List, Optional, Tuple
+import os as _os
+import importlib as _importlib
+
+_os.environ.setdefault("LANGGRAPH__ALLOWED_OBJECTS", "messages")
+
+try:
+    _lc_load_mod = _importlib.import_module("langchain_core.load.load")
+    if hasattr(_lc_load_mod, "Reviver"):
+        _orig_reviver_init = _lc_load_mod.Reviver.__init__
+        def _patched_reviver_init(self, *args, **kwargs):
+            if len(args) < 1 and "allowed_objects" not in kwargs:
+                kwargs["allowed_objects"] = "messages"
+            return _orig_reviver_init(self, *args, **kwargs)
+        _lc_load_mod.Reviver.__init__ = _patched_reviver_init
+except Exception as _exc:
+    import warnings as _w
+    _w.warn(f"[启动期] 无法 patch langchain Reviver 默认 allowed_objects，退化为告警抑制：{_exc}")
+
+warnings.filterwarnings(
+    "ignore",
+    message=r"The default value of `allowed_objects` will change in a future version.*",
+    category=Warning,
+    module=r"langchain_core\.load\.(load|dumps)",
+)
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware

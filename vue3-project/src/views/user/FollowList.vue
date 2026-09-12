@@ -59,7 +59,7 @@ const fixedSliderStyle = computed(() => {
 
   if (isLargeScreen) {
     return {
-      left: `calc(220px + (100vw - 220px - 240px) / 2 + ${index * 80}px)`
+      left: `calc(228px + (100vw - 228px - 240px) / 2 + ${index * 80}px)`
     }
   } else {
     return {
@@ -441,7 +441,7 @@ onMounted(() => {
   }
 
   .fixedTab {
-    padding-left: 220px;
+    padding-left: 228px;
   }
 
   .user-list-container {

@@ -3,7 +3,7 @@
 
     <div class="card-header">
       <div class="avatar-info">
-        <img :src="userInfo.avatar" :alt="userInfo.nickname" class="avatar" @error="handleAvatarError" v-img-fallback="avatar" />
+        <img :src="userInfo.avatar" :alt="userInfo.nickname" class="avatar" @error="handleAvatarError" v-img-fallback="'avatar'" />
         <div class="nickname-container">
           <span class="nickname">{{ userInfo.nickname }}</span>
           <VerifiedBadge :verified="userInfo.verified" />

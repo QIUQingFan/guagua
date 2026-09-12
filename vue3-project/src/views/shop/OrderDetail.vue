@@ -29,6 +29,8 @@ const statusHint = computed(() => {
             return '商品已发出，收到后请及时确认收货'
         case 'completed':
             return '订单已完成，感谢您的购买'
+        case 'refunded':
+            return '订单已退款，款项已原路退回您的支付宝账户'
         case 'cancelled':
             return '订单已取消'
         case 'closed':
@@ -37,6 +39,8 @@ const statusHint = computed(() => {
             return ''
     }
 })
+
+const isRefunded = computed(() => order.value?.refund_status === 'refunded')
 
 const reversedLogs = computed(() => [...logs.value].reverse())
 
@@ -81,8 +85,47 @@ async function handleConfirm() {
     }
 }
 
-function handlePay() {
-    showShopMessage('在线支付功能开发中，敬请期待', 'info')
+async function handlePay() {
+    if (!order.value) return
+    showShopMessage('正在生成支付链接...', 'info')
+    const res = await orderStore.pay(order.value.order_no)
+    if (res.success && res.data?.pay_url) {
+        const payWin = window.open(res.data.pay_url, '_blank')
+        showShopMessage('已在新窗口打开支付宝收银台，支付完成后本页会自动刷新', 'success')
+        const timer = setInterval(async () => {
+            const r = await orderStore.queryPayStatus(order.value.order_no)
+            if (r.success && r.data?.paid) {
+                clearInterval(timer)
+                showShopMessage('支付成功', 'success')
+                await loadLogs()
+            }
+        }, 3000)
+        setTimeout(() => clearInterval(timer), 120000)
+        if (payWin) {
+            const stop = setInterval(() => {
+                if (!payWin || payWin.closed) {
+                    clearInterval(stop)
+                    clearInterval(timer)
+                }
+            }, 1000)
+        }
+    } else {
+        showShopMessage(res.message || '发起支付失败', 'error')
+    }
+}
+
+async function handleRefund() {
+    if (!order.value) return
+    const reason = prompt(`确定对订单「${order.value.order_no}」申请全额退款吗？\n退款金额将原路退回您的支付宝账户。\n（可选）填写退款原因：`, '')
+    if (reason === null) return
+    const payload = reason === '' ? {} : { reason }
+    const res = await orderStore.refund(order.value.order_no, payload)
+    if (res.success) {
+        showShopMessage('退款成功，款项已原路退回', 'success')
+        await loadLogs()
+    } else {
+        showShopMessage(res.message || '退款失败', 'error')
+    }
 }
 
 async function loadLogs() {
@@ -203,6 +246,10 @@ onMounted(loadAll)
                     <span>实付款</span>
                     <span class="pay-amount">¥{{ order.pay_amount }}</span>
                 </div>
+                <div v-if="isRefunded" class="amount-row refund-row">
+                    <span>已退款</span>
+                    <span class="refund-amount">¥{{ order.refund_amount }}</span>
+                </div>
             </section>
 
             <section class="block info-block">
@@ -218,6 +265,18 @@ onMounted(loadAll)
                 <div v-if="order.paid_at" class="info-row">
                     <span class="info-label">付款时间</span>
                     <span class="info-value">{{ formatTime(order.paid_at) }}</span>
+                </div>
+                <div v-if="order.refund_at" class="info-row">
+                    <span class="info-label">退款时间</span>
+                    <span class="info-value">{{ formatTime(order.refund_at) }}</span>
+                </div>
+                <div v-if="order.refund_reason" class="info-row">
+                    <span class="info-label">退款原因</span>
+                    <span class="info-value">{{ order.refund_reason }}</span>
+                </div>
+                <div v-if="order.trade_no" class="info-row">
+                    <span class="info-label">支付宝交易号</span>
+                    <span class="info-value">{{ order.trade_no }}</span>
                 </div>
                 <div v-if="order.shipped_at" class="info-row">
                     <span class="info-label">发货时间</span>
@@ -261,7 +320,7 @@ onMounted(loadAll)
                 </div>
             </section>
 
-            <div class="action-bar" v-if="['pending_payment', 'shipped'].includes(order.status)">
+            <div class="action-bar" v-if="['pending_payment', 'pending_shipment', 'shipped', 'completed'].includes(order.status)">
                 <div class="action-bar-inner">
                     <button
                         v-if="order.status === 'pending_payment'"
@@ -274,9 +333,10 @@ onMounted(loadAll)
                     <button
                         v-if="order.status === 'pending_payment'"
                         class="action-btn primary"
+                        :disabled="submitting"
                         @click="handlePay"
                     >
-                        去支付
+                        {{ submitting ? '处理中...' : '去支付' }}
                     </button>
                     <button
                         v-if="order.status === 'shipped'"
@@ -285,6 +345,14 @@ onMounted(loadAll)
                         @click="handleConfirm"
                     >
                         {{ submitting ? '处理中...' : '确认收货' }}
+                    </button>
+                    <button
+                        v-if="['pending_shipment', 'shipped', 'completed'].includes(order.status) && !isRefunded"
+                        class="action-btn default"
+                        :disabled="submitting"
+                        @click="handleRefund"
+                    >
+                        {{ submitting ? '处理中...' : '申请退款' }}
                     </button>
                 </div>
             </div>
@@ -354,7 +422,8 @@ onMounted(loadAll)
 }
 
 .status-header.status-cancelled,
-.status-header.status-closed {
+.status-header.status-closed,
+.status-header.status-refunded {
     background: var(--series-neutral);
 }
 
@@ -517,6 +586,16 @@ onMounted(loadAll)
 
 .pay-amount {
     color: var(--primary-color);
+    font-size: 18px;
+    font-weight: 700;
+}
+
+.refund-row {
+    border-top: 1px dashed var(--border-color-primary, #eee);
+}
+
+.refund-amount {
+    color: var(--series-warning, #f59e0b);
     font-size: 18px;
     font-weight: 700;
 }

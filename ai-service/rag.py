@@ -25,6 +25,38 @@ embeddings_model = OpenAIEmbeddings(
 )
 
 
+def query_in_stock_product_ids(ids: List[int]) -> set:
+    """实时查询哪些商品当前在售且有库存
+
+    用于检索/推荐链路做实时库存兜底：向量索引是构建时的静态快照，
+    商品可能随后售空，这里以数据库为准剔除买不到的商品。
+    """
+    from guagua_adapter import PRODUCT_STATUS_ON_SALE
+
+    if not ids:
+        return set()
+    uniq_ids = list(dict.fromkeys(ids))
+    in_stock: set = set()
+    batch_size = 200
+    with engine.connect() as conn:
+        for i in range(0, len(uniq_ids), batch_size):
+            batch = uniq_ids[i : i + batch_size]
+            placeholders = ",".join(f":id{j}" for j in range(len(batch)))
+            params = {f"id{j}": pid for j, pid in enumerate(batch)}
+            params["status"] = PRODUCT_STATUS_ON_SALE
+            rows = conn.execute(
+                text(
+                    f"SELECT p.id FROM products p "
+                    f"WHERE p.id IN ({placeholders}) "
+                    f"AND p.is_deleted = 0 AND p.status = :status "
+                    f"AND COALESCE(p.stock, 0) > 0"
+                ),
+                params,
+            ).fetchall()
+            in_stock.update(r[0] for r in rows)
+    return in_stock
+
+
 def _build_product_chunks() -> List[dict]:
     from guagua_adapter import PRODUCT_STATUS_ON_SALE
 
@@ -37,6 +69,7 @@ def _build_product_chunks() -> List[dict]:
             FROM products p
             LEFT JOIN shop_categories c ON p.category_id = c.id
             WHERE p.is_deleted = 0 AND p.status = :status
+              AND COALESCE(p.stock, 0) > 0
         """), {"status": PRODUCT_STATUS_ON_SALE}).fetchall()
 
     for r in rows:
@@ -235,12 +268,34 @@ def search_knowledge(query: str, top_k: int = 5) -> List[Tuple[str, dict]]:
     results = _collection.query(
         query_embeddings=[query_vector],
         n_results=min(top_k, count),
-        include=["documents", "metadatas"],
+        include=["documents", "metadatas", "ids"],
     )
 
     docs = results.get("documents", [[]])[0] or []
     metas = results.get("metadatas", [[]])[0] or []
-    return list(zip(docs, metas))
+    ids = results.get("ids", [[]])[0] or []
+
+    # 实时库存过滤：索引是构建时快照，剔除已售空/下架商品，防止推荐买不到的商品
+    product_ids: List[int] = []
+    for cid, meta in zip(ids, metas):
+        if (meta or {}).get("source_type") not in ("product", "hot"):
+            continue
+        parts = str(cid).split("_")
+        if len(parts) >= 2 and parts[1].isdigit():
+            product_ids.append(int(parts[1]))
+    in_stock = query_in_stock_product_ids(product_ids)
+
+    result: List[Tuple[str, dict]] = []
+    for doc, meta, cid in zip(docs, metas, ids):
+        if (meta or {}).get("source_type") in ("product", "hot"):
+            parts = str(cid).split("_")
+            if len(parts) >= 2 and parts[1].isdigit():
+                if int(parts[1]) not in in_stock:
+                    continue
+            else:
+                continue
+        result.append((doc, meta))
+    return result
 
 
 

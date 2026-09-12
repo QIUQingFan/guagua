@@ -135,7 +135,7 @@ const createGroup = async (socket, data, callback) => {
 const sendGroupMessage = async (io, socket, data, callback) => {
     try {
         const fromUserId = socket.userId;
-        const { groupId, content, type = 1, share_id, share_title, share_cover } = data;
+        const { groupId, content, type = 1, share_id, share_title, share_cover, quote_message_id, quote, mentionUserIds } = data;
 
         if (!groupId) {
             return safeCallback(callback, { success: false, error: '缺少群ID' });
@@ -155,9 +155,28 @@ const sendGroupMessage = async (io, socket, data, callback) => {
             return safeCallback(callback, { success: false, error: '不是群成员，无法发送消息' });
         }
 
+        // 构建扩展数据（引用快照 + @提及）
+        let extra = null;
+        if (quote && quote.id) {
+            extra = {
+                quote: {
+                    id: Number(quote.id),
+                    content: quote.content ? String(quote.content).slice(0, 500) : '',
+                    from_nickname: quote.from_nickname || ''
+                }
+            };
+        }
+        const mentions = Array.isArray(mentionUserIds)
+            ? [...new Set(mentionUserIds.map(Number).filter(id => id && id !== Number(fromUserId)))]
+            : [];
+        if (mentions.length > 0) {
+            extra = extra || {};
+            extra.mentions = mentions;
+        }
+
         const [result] = await pool.execute(
-            'INSERT INTO group_messages (group_id, from_user_id, content, type, share_id, share_title, share_cover) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            [groupId, fromUserId, content, type, share_id || null, share_title || null, share_cover || null]
+            'INSERT INTO group_messages (group_id, from_user_id, content, type, share_id, share_title, share_cover, quote_message_id, extra) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [groupId, fromUserId, content, type, share_id || null, share_title || null, share_cover || null, quote_message_id || null, extra ? JSON.stringify(extra) : null]
         );
 
         const [users] = await pool.execute(
@@ -175,6 +194,8 @@ const sendGroupMessage = async (io, socket, data, callback) => {
             share_id: share_id || null,
             share_title: share_title || null,
             share_cover: share_cover || null,
+            quote_message_id: quote_message_id || null,
+            extra: extra,
             created_at: new Date().toISOString(),
             from_nickname: fromUser.nickname || null,
             from_avatar: fromUser.avatar || null

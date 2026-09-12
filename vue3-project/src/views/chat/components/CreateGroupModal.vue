@@ -1,7 +1,8 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useUserStore } from '@/stores/user'
 import { useChatStore } from '@/stores/chat'
+import { userApi } from '@/api'
 import SvgIcon from '@/components/SvgIcon.vue'
 
 const props = defineProps({
@@ -24,15 +25,74 @@ const isCreating = ref(false)
 
 const defaultAvatar = new URL('@/assets/imgs/瓜呱.png', import.meta.url).href
 
-const followings = computed(() => userStore.followings || [])
+const memberLoading = ref(false)
+const members = ref([])
 
-const filteredFollowings = computed(() => {
-  if (!searchKeyword.value.trim()) return followings.value
+// 当前登录用户 id
+const currentUserId = computed(() => userStore.userInfo?.id || null)
+
+// 最近私聊联系人
+const recentContacts = computed(() => {
+  return (chatStore.sessions || [])
+    .filter(s => Number(s.session_type) === 1 && s.target_id)
+    .map(s => ({
+      id: Number(s.target_id),
+      nickname: s.target_nickname,
+      avatar: s.target_avatar
+    }))
+})
+
+// 合并关注列表 + 最近联系人，按 id 去重，并排除自己
+const allMembers = computed(() => {
+  const combined = [...members.value, ...recentContacts.value]
+  const map = new Map()
+  combined.forEach(u => {
+    if (!u || !u.id) return
+    const id = Number(u.id)
+    if (id === Number(currentUserId.value)) return
+    if (!map.has(id)) {
+      map.set(id, { ...u, id })
+    } else {
+      const existing = map.get(id)
+      if (!existing.nickname && u.nickname) existing.nickname = u.nickname
+      if (!existing.avatar && u.avatar) existing.avatar = u.avatar
+    }
+  })
+  return Array.from(map.values())
+})
+
+const filteredMembers = computed(() => {
+  if (!searchKeyword.value.trim()) return allMembers.value
   const keyword = searchKeyword.value.trim().toLowerCase()
-  return followings.value.filter(user =>
-    (user.nickname || '').toLowerCase().includes(keyword)
+  return allMembers.value.filter(user =>
+    (user.nickname || '').toLowerCase().includes(keyword) ||
+    String(user.id).includes(keyword)
   )
 })
+
+// 打开弹窗时加载关注列表
+watch(() => props.visible, async (visible) => {
+  if (!visible) return
+  await loadFollowings()
+})
+
+async function loadFollowings() {
+  if (!currentUserId.value) return
+  memberLoading.value = true
+  try {
+    const res = await userApi.getFollowing(currentUserId.value, { limit: 100 })
+    if (res && res.success && res.data && Array.isArray(res.data.following)) {
+      members.value = res.data.following
+    } else {
+      members.value = []
+    }
+  } catch (e) {
+    console.error('[CreateGroupModal] 加载关注列表失败:', e)
+    members.value = []
+  } finally {
+    memberLoading.value = false
+  }
+}
 
 const canCreate = computed(() => {
   return groupName.value.trim().length > 0 &&
@@ -124,21 +184,24 @@ const handleOverlayClick = () => {
               v-model="searchKeyword"
               type="text"
               class="form-input"
-              placeholder="搜索关注的人"
+              placeholder="搜索联系人昵称"
             />
             <div class="member-list">
-              <div
-                v-for="user in filteredFollowings"
-                :key="user.id"
-                class="member-item"
-                :class="{ selected: isSelected(user.id) }"
-                @click="toggleMember(user.id)"
-              >
-                <img :src="user.avatar || defaultAvatar" class="member-avatar" alt="头像" v-img-fallback="avatar" />
-                <span class="member-name">{{ user.nickname || `用户${user.id}` }}</span>
-                <span v-if="isSelected(user.id)" class="selected-mark">✓</span>
-              </div>
-              <div v-if="filteredFollowings.length === 0" class="empty-members">
+              <div v-if="memberLoading" class="empty-members">加载中...</div>
+              <template v-else-if="filteredMembers.length > 0">
+                <div
+                  v-for="user in filteredMembers"
+                  :key="user.id"
+                  class="member-item"
+                  :class="{ selected: isSelected(user.id) }"
+                  @click="toggleMember(user.id)"
+                >
+                  <img :src="user.avatar || defaultAvatar" class="member-avatar" alt="头像" v-img-fallback="'avatar'" />
+                  <span class="member-name">{{ user.nickname || `用户${user.id}` }}</span>
+                  <span v-if="isSelected(user.id)" class="selected-mark">✓</span>
+                </div>
+              </template>
+              <div v-else class="empty-members">
                 没有可选成员
               </div>
             </div>

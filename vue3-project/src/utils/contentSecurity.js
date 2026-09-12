@@ -125,6 +125,79 @@ export const sanitizeText = (content) => {
 }
 
 /**
+ * 富文本内容安全过滤（白名单模式）
+ * 仅保留安全的富文本标签与属性，移除脚本/事件属性等危险内容
+ * @param {string} html - 需要过滤的富文本 HTML
+ * @returns {string} - 过滤后的安全 HTML
+ */
+const ALLOWED_RICH_TAGS = new Set([
+  'p', 'br', 'hr', 'strong', 'b', 'em', 'i', 'u', 's', 'strike', 'sub', 'sup',
+  'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li', 'blockquote',
+  'a', 'img', 'span', 'div', 'code', 'pre',
+  'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td', 'caption'
+])
+
+const DANGEROUS_RICH_TAGS = new Set([
+  'script', 'iframe', 'object', 'embed', 'form', 'input', 'button', 'select', 'option',
+  'textarea', 'link', 'meta', 'style', 'base', 'applet', 'frame', 'frameset',
+  'video', 'audio', 'source', 'svg', 'math', 'template'
+])
+
+const DANGEROUS_ATTR_REGEX = /^(on\w+)$/i
+const DANGEROUS_URL_REGEX = /^\s*(javascript|vbscript|data:text\/html)\s*:/i
+
+const sanitizeRichTextNode = (node) => {
+  if (node.nodeType === Node.ELEMENT_NODE) {
+    const tag = node.tagName.toLowerCase()
+
+    if (DANGEROUS_RICH_TAGS.has(tag)) {
+      node.remove()
+      return
+    }
+
+    Array.from(node.attributes || []).forEach((attr) => {
+      const name = attr.name.toLowerCase()
+      if (DANGEROUS_ATTR_REGEX.test(name)) {
+        node.removeAttribute(attr.name)
+        return
+      }
+      if (name === 'href' || name === 'src' || name === 'action' || name === 'xlink:href') {
+        if (DANGEROUS_URL_REGEX.test(attr.value)) {
+          node.removeAttribute(attr.name)
+        }
+      }
+      if (name === 'style') {
+        node.removeAttribute(attr.name)
+      }
+    })
+
+    if (!ALLOWED_RICH_TAGS.has(tag)) {
+      const parent = node.parentNode
+      while (node.firstChild) {
+        const first = node.firstChild
+        parent.insertBefore(first, node)
+        sanitizeRichTextNode(first)
+      }
+      parent.removeChild(node)
+      return
+    }
+  }
+
+  const children = Array.from(node.childNodes)
+  for (const child of children) {
+    sanitizeRichTextNode(child)
+  }
+}
+
+export const sanitizeRichText = (html) => {
+  if (!html) return ''
+  const tempDiv = document.createElement('div')
+  tempDiv.innerHTML = String(html)
+  sanitizeRichTextNode(tempDiv)
+  return tempDiv.innerHTML
+}
+
+/**
  * 验证内容是否包含危险标签
  * @param {string} content - 需要验证的内容
  * @returns {boolean} - 是否包含危险标签

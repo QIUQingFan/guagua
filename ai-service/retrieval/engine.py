@@ -24,6 +24,43 @@ from retrieval.vector_store import ChromaVectorStore
 logger = logging.getLogger("retrieval")
 
 
+def _filter_in_stock(chunks: List[RetrievedChunk]) -> List[RetrievedChunk]:
+    """
+    实时库存过滤
+    """
+    product_chunks = [
+        c for c in chunks if c.source_type in ("product", "hot")
+    ]
+    if not product_chunks:
+        return chunks
+    other_chunks = [c for c in chunks if c.source_type not in ("product", "hot")]
+
+    product_ids: List[int] = []
+    for c in product_chunks:
+        try:
+            pid = int(c.source_id)
+        except (TypeError, ValueError):
+            continue
+        if pid not in product_ids:
+            product_ids.append(pid)
+
+    if not product_ids:
+        return chunks
+
+    from rag import query_in_stock_product_ids
+    in_stock = query_in_stock_product_ids(product_ids)
+
+    kept_products = [c for c in product_chunks if _chunk_product_id(c) in in_stock]
+    return kept_products + other_chunks
+
+
+def _chunk_product_id(chunk: RetrievedChunk) -> Optional[int]:
+    try:
+        return int(chunk.source_id)
+    except (TypeError, ValueError):
+        return None
+
+
 class RetrievalBudget:
     """检索漏斗预算"""
 
@@ -140,6 +177,7 @@ class MultiChannelRetrievalEngine:
                 fused = fused + fill
 
         truncated = truncate_for_rerank(fused, self._budget.rerank_candidate_limit)
+        truncated = _filter_in_stock(truncated)
         final = truncated[:final_top_k]
 
         self._log_attribution(channel_results, final)
@@ -157,7 +195,7 @@ class MultiChannelRetrievalEngine:
 
     @staticmethod
     def _log_attribution(channel_results: List[SearchChannelResult], final: List[RetrievedChunk]):
-        """检索归因日志：最终结果按来源通道分布，便于调参（如调 channel-weights）"""
+        """检索归因日志：最终结果按来源通道分布，便于调参"""
         if len(channel_results) <= 1:
             return
         source_index: Dict[str, set] = {}

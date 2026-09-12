@@ -76,10 +76,18 @@ router.get('/sessions', authenticateToken, async (req, res) => {
         CASE 
           WHEN cs.session_type = 1 THEN u.avatar 
           ELSE cg.avatar 
-        END as target_avatar
+        END as target_avatar,
+        cg.announcement as group_announcement,
+        gma.member_avatars
        FROM chat_sessions cs
        LEFT JOIN users u ON cs.session_type = 1 AND cs.target_id = u.id
        LEFT JOIN chat_groups cg ON cs.session_type = 2 AND cs.target_id = cg.id
+       LEFT JOIN (
+           SELECT gm.group_id, GROUP_CONCAT(u.avatar ORDER BY gm.role ASC, gm.joined_at ASC SEPARATOR ',') AS member_avatars
+           FROM group_members gm
+           JOIN users u ON gm.user_id = u.id
+           GROUP BY gm.group_id
+       ) gma ON cs.session_type = 2 AND cs.target_id = gma.group_id
        WHERE cs.user_id = ?
        ORDER BY cs.updated_at DESC`,
             [userId]
@@ -158,7 +166,7 @@ router.post('/sessions', authenticateToken, async (req, res) => {
             });
         }
 
-        
+
         const [users] = await pool.execute(
             'SELECT id, nickname, avatar FROM users WHERE id = ?',
             [String(targetId)]
@@ -171,7 +179,7 @@ router.post('/sessions', authenticateToken, async (req, res) => {
         }
         const peer = users[0];
 
-        
+
         const [existing] = await pool.execute(
             'SELECT * FROM chat_sessions WHERE user_id = ? AND session_type = 1 AND target_id = ?',
             [String(userId), String(targetId)]
@@ -193,7 +201,7 @@ router.post('/sessions', authenticateToken, async (req, res) => {
                 unread_count: 0,
                 updated_at: new Date()
             };
-            
+
             const [peerExisting] = await pool.execute(
                 'SELECT id FROM chat_sessions WHERE user_id = ? AND session_type = 1 AND target_id = ?',
                 [String(targetId), String(userId)]
@@ -252,7 +260,7 @@ router.get('/messages/:sessionId', authenticateToken, async (req, res) => {
             });
         }
 
-        
+
         const [sessions] = await pool.execute(
             'SELECT * FROM chat_sessions WHERE id = ? AND user_id = ?',
             [String(sessionId), String(userId)]
@@ -269,11 +277,12 @@ router.get('/messages/:sessionId', authenticateToken, async (req, res) => {
         let total = 0;
 
         if (session.session_type === 1) {
-            
+
             const peerId = session.target_id;
             [rows] = await pool.execute(
                 `SELECT pm.id, pm.from_user_id, pm.to_user_id, pm.content, pm.type, pm.is_read, pm.created_at,
                         pm.share_id, pm.share_title, pm.share_cover,
+                        pm.is_recalled, pm.recall_at, pm.quote_message_id, pm.extra,
                         u_from.nickname AS from_nickname, u_from.avatar AS from_avatar
                  FROM private_messages pm
                  JOIN users u_from ON pm.from_user_id = u_from.id
@@ -291,11 +300,12 @@ router.get('/messages/:sessionId', authenticateToken, async (req, res) => {
             );
             total = t;
         } else {
-            
+
             const groupId = session.target_id;
             [rows] = await pool.execute(
                 `SELECT gm.id, gm.user_id AS from_user_id, gm.content, gm.type, gm.created_at,
                         gm.share_id, gm.share_title, gm.share_cover,
+                        gm.is_recalled, gm.recall_at, gm.quote_message_id, gm.extra,
                         u.nickname AS from_nickname, u.avatar AS from_avatar
                  FROM group_messages gm
                  JOIN users u ON gm.user_id = u.id
@@ -375,9 +385,15 @@ router.get('/groups', authenticateToken, async (req, res) => {
         const userId = req.user.id;
 
         const [groups] = await pool.execute(
-            `SELECT cg.*, gm.role 
+            `SELECT cg.*, gm.role, gma.member_avatars
        FROM chat_groups cg
        JOIN group_members gm ON cg.id = gm.group_id
+       LEFT JOIN (
+           SELECT gm.group_id, GROUP_CONCAT(u.avatar ORDER BY gm.role ASC, gm.joined_at ASC SEPARATOR ',') AS member_avatars
+           FROM group_members gm
+           JOIN users u ON gm.user_id = u.id
+           GROUP BY gm.group_id
+       ) gma ON cg.id = gma.group_id
        WHERE gm.user_id = ?
        ORDER BY cg.updated_at DESC`,
             [userId]
@@ -448,7 +464,7 @@ router.post('/groups', authenticateToken, async (req, res) => {
 
             await connection.commit();
 
-            
+
             const io = req.app.get('io');
             if (io) {
                 uniqueMemberIds.forEach(memberId => {
@@ -496,6 +512,164 @@ router.post('/groups', authenticateToken, async (req, res) => {
 });
 
 /**
+ * 更新群聊信息（仅群主）
+ * PUT /api/chat/groups/:id
+ * body: { name?, description?, avatar? }
+ */
+router.put('/groups/:id', authenticateToken, async (req, res) => {
+    try {
+        const operatorId = req.user.id;
+        const groupId = parseInt(req.params.id);
+        const { name, description, avatar } = req.body;
+
+        const [groups] = await pool.execute(
+            'SELECT id, owner_id FROM chat_groups WHERE id = ?',
+            [groupId]
+        );
+        if (!groups || groups.length === 0) {
+            return res.status(HTTP_STATUS.NOT_FOUND).json({
+                code: RESPONSE_CODES.NOT_FOUND,
+                message: '群不存在'
+            });
+        }
+
+        if (groups[0].owner_id !== operatorId) {
+            return res.status(HTTP_STATUS.FORBIDDEN).json({
+                code: RESPONSE_CODES.FORBIDDEN,
+                message: '只有群主可以修改群信息'
+            });
+        }
+
+        if (name !== undefined && (typeof name !== 'string' || !name.trim())) {
+            return res.status(HTTP_STATUS.BAD_REQUEST).json({
+                code: RESPONSE_CODES.VALIDATION_ERROR,
+                message: '群名称不能为空'
+            });
+        }
+        if (name !== undefined && name.length > 100) {
+            return res.status(HTTP_STATUS.BAD_REQUEST).json({
+                code: RESPONSE_CODES.VALIDATION_ERROR,
+                message: '群名称过长'
+            });
+        }
+
+        const fields = [];
+        const values = [];
+        if (name !== undefined) {
+            fields.push('`name` = ?');
+            values.push(name.trim());
+        }
+        if (description !== undefined) {
+            fields.push('`description` = ?');
+            values.push(description);
+        }
+        if (avatar !== undefined) {
+            fields.push('`avatar` = ?');
+            values.push(avatar || null);
+        }
+        if (fields.length === 0) {
+            return res.status(HTTP_STATUS.BAD_REQUEST).json({
+                code: RESPONSE_CODES.VALIDATION_ERROR,
+                message: '没有需要更新的字段'
+            });
+        }
+
+        values.push(groupId);
+        await pool.execute(
+            `UPDATE chat_groups SET ${fields.join(', ')} WHERE id = ?`,
+            values
+        );
+
+        const [updated] = await pool.execute(
+            'SELECT id, name, avatar, description, announcement, announcement_updated_at, member_count, created_at FROM chat_groups WHERE id = ?',
+            [groupId]
+        );
+
+        // 实时通知群内成员
+        const io = req.app.get('io');
+        if (io) {
+            io.to(`group:${groupId}`).emit('group:updated', updated[0]);
+        }
+
+        res.json({
+            code: RESPONSE_CODES.SUCCESS,
+            data: updated[0]
+        });
+    } catch (error) {
+        console.error('更新群信息失败:', error);
+        res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
+            code: RESPONSE_CODES.ERROR,
+            message: '更新失败'
+        });
+    }
+});
+
+/**
+ * 更新群公告（仅群主）
+ * PUT /api/chat/groups/:id/announcement
+ * body: { announcement: string }
+ */
+router.put('/groups/:id/announcement', authenticateToken, async (req, res) => {
+    try {
+        const operatorId = req.user.id;
+        const groupId = parseInt(req.params.id);
+        const { announcement } = req.body;
+
+        const [groups] = await pool.execute(
+            'SELECT id, owner_id FROM chat_groups WHERE id = ?',
+            [groupId]
+        );
+        if (!groups || groups.length === 0) {
+            return res.status(HTTP_STATUS.NOT_FOUND).json({
+                code: RESPONSE_CODES.NOT_FOUND,
+                message: '群不存在'
+            });
+        }
+
+        if (groups[0].owner_id !== operatorId) {
+            return res.status(HTTP_STATUS.FORBIDDEN).json({
+                code: RESPONSE_CODES.FORBIDDEN,
+                message: '只有群主可以修改群公告'
+            });
+        }
+
+        if (announcement === undefined || typeof announcement !== 'string') {
+            return res.status(HTTP_STATUS.BAD_REQUEST).json({
+                code: RESPONSE_CODES.VALIDATION_ERROR,
+                message: '公告内容不能为空'
+            });
+        }
+
+        const trimmed = announcement.trim();
+        await pool.execute(
+            'UPDATE chat_groups SET announcement = ?, announcement_updated_at = NOW() WHERE id = ?',
+            [trimmed || null, groupId]
+        );
+
+        const [updated] = await pool.execute(
+            'SELECT id, name, avatar, description, announcement, announcement_updated_at, member_count, created_at FROM chat_groups WHERE id = ?',
+            [groupId]
+        );
+
+        const io = req.app.get('io');
+        if (io) {
+            io.to(`group:${groupId}`).emit('group:updated', updated[0]);
+        }
+
+        res.json({
+            code: RESPONSE_CODES.SUCCESS,
+            data: updated[0]
+        });
+    } catch (error) {
+        console.error('更新群公告失败:', error);
+        res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
+            code: RESPONSE_CODES.ERROR,
+            message: '更新失败'
+        });
+    }
+});
+
+/**
  * 获取群成员列表
  * GET /api/chat/groups/:id/members
  */
@@ -504,7 +678,7 @@ router.get('/groups/:id/members', authenticateToken, async (req, res) => {
         const userId = req.user.id;
         const groupId = parseInt(req.params.id);
 
-        
+
         const [membership] = await pool.execute(
             'SELECT id FROM group_members WHERE group_id = ? AND user_id = ?',
             [groupId, userId]
@@ -550,7 +724,7 @@ router.get('/groups/:id/messages', authenticateToken, async (req, res) => {
         const pageSize = parseInt(req.query.pageSize) || DEFAULT_PAGE_SIZE;
         const offset = (page - 1) * pageSize;
 
-        
+
         const [membership] = await pool.execute(
             'SELECT id FROM group_members WHERE group_id = ? AND user_id = ?',
             [groupId, userId]
@@ -599,7 +773,7 @@ router.post('/groups/:id/read', authenticateToken, async (req, res) => {
         const userId = req.user.id;
         const groupId = parseInt(req.params.id);
 
-        
+
         const [membership] = await pool.execute(
             'SELECT id FROM group_members WHERE group_id = ? AND user_id = ?',
             [groupId, userId]
@@ -638,7 +812,7 @@ router.post('/groups/:id/join', authenticateToken, async (req, res) => {
         const userId = req.user.id;
         const groupId = parseInt(req.params.id);
 
-        
+
         const [groups] = await pool.execute(
             'SELECT id FROM chat_groups WHERE id = ?',
             [groupId]
@@ -650,7 +824,7 @@ router.post('/groups/:id/join', authenticateToken, async (req, res) => {
             });
         }
 
-        
+
         const [existing] = await pool.execute(
             'SELECT id FROM group_members WHERE group_id = ? AND user_id = ?',
             [groupId, userId]
@@ -770,6 +944,79 @@ router.post('/groups/:id/leave', authenticateToken, async (req, res) => {
 });
 
 /**
+ * 获取群邀请候选用户
+ * GET /api/chat/groups/:id/invite-candidates
+ */
+router.get('/groups/:id/invite-candidates', authenticateToken, async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const groupId = parseInt(req.params.id);
+
+        // 当前群成员ID（含自己）
+        const [members] = await pool.execute(
+            'SELECT user_id FROM group_members WHERE group_id = ?',
+            [groupId]
+        );
+        const memberIds = new Set(members.map(m => Number(m.user_id)));
+        memberIds.add(Number(userId));
+
+        // 1. 最近聊天对象（私聊会话）
+        const [recentChats] = await pool.execute(
+            `SELECT cs.target_id AS id, u.nickname, u.avatar
+             FROM chat_sessions cs
+             LEFT JOIN users u ON cs.target_id = u.id
+             WHERE cs.user_id = ? AND cs.session_type = 1
+             ORDER BY cs.updated_at DESC
+             LIMIT 30`,
+            [userId]
+        );
+
+        // 2. 关注对象
+        const [followed] = await pool.execute(
+            `SELECT u.id, u.nickname, u.avatar
+             FROM follows f
+             LEFT JOIN users u ON f.following_id = u.id
+             WHERE f.follower_id = ?
+             ORDER BY f.created_at DESC
+             LIMIT 30`,
+            [userId.toString()]
+        );
+
+        // 合并去重，标注来源
+        const map = new Map();
+        const addUser = (u, source) => {
+            if (!u || !u.id) return;
+            const id = Number(u.id);
+            if (!id || memberIds.has(id)) return;
+            if (!map.has(id)) {
+                map.set(id, { id, nickname: u.nickname || `用户${id}`, avatar: u.avatar, sources: new Set() });
+            }
+            map.get(id).sources.add(source);
+        };
+        recentChats.forEach(u => addUser(u, 'chat'));
+        followed.forEach(u => addUser(u, 'follow'));
+
+        const data = Array.from(map.values()).map(item => ({
+            id: item.id,
+            nickname: item.nickname,
+            avatar: item.avatar,
+            sources: Array.from(item.sources)
+        }));
+
+        res.json({
+            code: RESPONSE_CODES.SUCCESS,
+            data
+        });
+    } catch (error) {
+        console.error('获取群邀请候选失败:', error);
+        res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
+            code: RESPONSE_CODES.ERROR,
+            message: '获取失败'
+        });
+    }
+});
+
+/**
  * 邀请用户加入群聊
  * POST /api/chat/groups/:id/invite
  */
@@ -786,7 +1033,7 @@ router.post('/groups/:id/invite', authenticateToken, async (req, res) => {
             });
         }
 
-        
+
         const [membership] = await pool.execute(
             'SELECT id FROM group_members WHERE group_id = ? AND user_id = ?',
             [groupId, inviterId]
@@ -798,7 +1045,7 @@ router.post('/groups/:id/invite', authenticateToken, async (req, res) => {
             });
         }
 
-        
+
         const [existing] = await pool.execute(
             'SELECT id FROM group_members WHERE group_id = ? AND user_id = ?',
             [groupId, userId]
@@ -831,7 +1078,7 @@ router.post('/groups/:id/invite', authenticateToken, async (req, res) => {
 
             await connection.commit();
 
-            
+
             const io = req.app.get('io');
             if (io) {
                 const socketIds = connectionManager.getUserSocketIds(userId);
@@ -877,7 +1124,7 @@ router.post('/groups/:id/remove', authenticateToken, async (req, res) => {
             });
         }
 
-        
+
         const [operator] = await pool.execute(
             'SELECT role FROM group_members WHERE group_id = ? AND user_id = ?',
             [groupId, operatorId]
@@ -917,7 +1164,7 @@ router.post('/groups/:id/remove', authenticateToken, async (req, res) => {
 
             await connection.commit();
 
-            
+
             const io = req.app.get('io');
             if (io) {
                 const socketIds = connectionManager.getUserSocketIds(userId);
@@ -999,7 +1246,7 @@ router.post('/groups/:id/dissolve', authenticateToken, async (req, res) => {
 
             await connection.commit();
 
-            
+
             const io = req.app.get('io');
             if (io) {
                 io.to(`group:${groupId}`).emit('group:dissolved', { groupId });

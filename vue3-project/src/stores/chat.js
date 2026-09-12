@@ -10,7 +10,9 @@ import {
     getGroupHistory,
     joinChatGroup,
     leaveChatGroup,
-    getUserBrief
+    getUserBrief,
+    updateChatGroupInfo,
+    updateGroupAnnouncement
 } from '@/api/chat.js'
 import { sanitizeText } from '@/utils/contentSecurity.js'
 import { setUserCache, setUserCacheBatch } from '@/utils/chatUserResolver.js'
@@ -24,6 +26,31 @@ export const useChatStore = defineStore('chat', () => {
     const unreadCount = ref(0)
     const isLoading = ref(false)
     const isInitialized = ref(false)
+
+    /**
+     * 解析群成员头像字符串（逗号分隔）为数组
+     */
+    function parseMemberAvatars(session) {
+        if (!session) return []
+        if (Array.isArray(session.member_avatars)) return session.member_avatars
+        if (typeof session.member_avatars === 'string' && session.member_avatars.trim()) {
+            return session.member_avatars.split(',').map(s => s.trim()).filter(Boolean)
+        }
+        return []
+    }
+
+    /**
+     * 解析消息扩展数据（extra 可能是 JSON 字符串或对象）
+     */
+    function parseMessageExtra(extra) {
+        if (!extra) return null
+        if (typeof extra === 'object') return extra
+        try {
+            return JSON.parse(extra)
+        } catch (e) {
+            return null
+        }
+    }
 
     const currentMessages = computed(() => {
         if (!currentTargetId.value) return []
@@ -87,7 +114,13 @@ export const useChatStore = defineStore('chat', () => {
         try {
             const response = await getChatSessions()
             if (response.success) {
-                sessions.value = response.data || []
+                sessions.value = (response.data || []).map(s => {
+                    if (Number(s.session_type) === 2) {
+                        s.member_avatars = parseMemberAvatars(s)
+                        s.group_announcement = s.group_announcement || null
+                    }
+                    return s
+                })
                 setUserCacheBatch(sessions.value.map(s => ({
                     id: s.target_id,
                     nickname: s.target_nickname,
@@ -252,7 +285,10 @@ export const useChatStore = defineStore('chat', () => {
         try {
             const response = await getChatGroups()
             if (response.success) {
-                groups.value = response.data || []
+                groups.value = (response.data || []).map(g => {
+                    g.member_avatars = parseMemberAvatars(g)
+                    return g
+                })
             }
             return response
         } catch (error) {
@@ -306,6 +342,7 @@ export const useChatStore = defineStore('chat', () => {
         socketService.on('group:message', handleGroupMessage)
         socketService.on('group:created', handleGroupCreated)
         socketService.on('group:invited', handleGroupInvited)
+        socketService.on('group:updated', handleGroupUpdated)
         socketService.on('session:update', handleSessionUpdate)
         socketService.on('group:recalled', handleGroupRecalled)
     }
@@ -320,6 +357,7 @@ export const useChatStore = defineStore('chat', () => {
         socketService.off('group:message', handleGroupMessage)
         socketService.off('group:created', handleGroupCreated)
         socketService.off('group:invited', handleGroupInvited)
+        socketService.off('group:updated', handleGroupUpdated)
         socketService.off('session:update', handleSessionUpdate)
         socketService.off('group:recalled', handleGroupRecalled)
     }
@@ -400,6 +438,62 @@ export const useChatStore = defineStore('chat', () => {
     }
 
     /**
+     * 处理群信息更新（群名/简介/头像/公告）
+     */
+    function handleGroupUpdated(group) {
+        if (!group) return
+        const groupId = Number(group.id)
+        if (!groupId) return
+        const existing = groups.value.find(g => g.id === groupId)
+        if (existing) {
+            Object.assign(existing, group)
+            if (group.member_avatars) {
+                existing.member_avatars = parseMemberAvatars(group)
+            }
+        }
+        // 同步会话列表中的群名与公告
+        sessions.value.forEach(s => {
+            if (Number(s.session_type) === 2 && Number(s.target_id) === groupId) {
+                if (group.name) s.target_nickname = group.name
+                if (group.avatar !== undefined) s.target_avatar = group.avatar
+                if (group.announcement !== undefined) s.group_announcement = group.announcement
+            }
+        })
+    }
+
+    /**
+     * 更新群聊信息（仅群主）
+     */
+    async function updateGroupInfo(groupId, data = {}) {
+        try {
+            const response = await updateChatGroupInfo(groupId, data)
+            if (response.success && response.data) {
+                handleGroupUpdated(response.data)
+            }
+            return response
+        } catch (error) {
+            console.error('更新群信息失败:', error)
+            return { success: false, message: error.message || '更新失败' }
+        }
+    }
+
+    /**
+     * 更新群公告（仅群主）
+     */
+    async function saveGroupAnnouncement(groupId, announcement) {
+        try {
+            const response = await updateGroupAnnouncement(groupId, announcement)
+            if (response.success && response.data) {
+                handleGroupUpdated(response.data)
+            }
+            return response
+        } catch (error) {
+            console.error('更新群公告失败:', error)
+            return { success: false, message: error.message || '更新失败' }
+        }
+    }
+
+    /**
      * 处理对方已读回执
      */
     function handlePrivateRead(data) {
@@ -463,18 +557,19 @@ export const useChatStore = defineStore('chat', () => {
 
     /**
      * 发送消息（根据当前会话类型自动判断私聊或群聊）
+     * @param {Object} options - { quote?, mentionUserIds? }
      */
-    async function sendMessage(targetId, content, type = 1) {
+    async function sendMessage(targetId, content, type = 1, options = {}) {
         if (currentSessionType.value === 2) {
-            return sendGroupMessage(targetId, content, type)
+            return sendGroupMessage(targetId, content, type, options)
         }
-        return sendPrivateMessage(targetId, content, type)
+        return sendPrivateMessage(targetId, content, type, options)
     }
 
     /**
      * 发送私聊消息
      */
-    async function sendPrivateMessage(toUserId, content, type = 1) {
+    async function sendPrivateMessage(toUserId, content, type = 1, options = {}) {
         const cleanContent = sanitizeText(content).trim()
         if (!cleanContent) {
             return { success: false, message: '消息内容不能为空' }
@@ -493,11 +588,16 @@ export const useChatStore = defineStore('chat', () => {
                 created_at: new Date().toISOString(),
                 from_nickname: me.nickname || null,
                 from_avatar: me.avatar || null,
+                quote_message_id: options.quote?.id || null,
+                quote: options.quote || null,
                 sending: true
             }
             appendMessage(toUserId, tempMessage)
 
-            const response = await socketService.sendPrivateMessage(toUserId, cleanContent, type)
+            const response = await socketService.sendPrivateMessage(toUserId, cleanContent, type, {
+                quote_message_id: options.quote?.id || null,
+                quote: options.quote || null
+            })
 
             if (response.success && response.data) {
                 replaceMessage(toUserId, tempMessage.id, normalizeMessage(response.data))
@@ -520,7 +620,7 @@ export const useChatStore = defineStore('chat', () => {
     /**
      * 发送群消息
      */
-    async function sendGroupMessage(groupId, content, type = 1) {
+    async function sendGroupMessage(groupId, content, type = 1, options = {}) {
         const cleanContent = sanitizeText(content).trim()
         if (!cleanContent) {
             return { success: false, message: '消息内容不能为空' }
@@ -538,11 +638,17 @@ export const useChatStore = defineStore('chat', () => {
                 created_at: new Date().toISOString(),
                 from_nickname: me.nickname || null,
                 from_avatar: me.avatar || null,
+                quote_message_id: options.quote?.id || null,
+                quote: options.quote || null,
                 sending: true
             }
             appendMessage(groupId, tempMessage)
 
-            const response = await socketService.sendGroupMessage(groupId, cleanContent, type)
+            const response = await socketService.sendGroupMessage(groupId, cleanContent, type, {
+                quote_message_id: options.quote?.id || null,
+                quote: options.quote || null,
+                mentionUserIds: options.mentionUserIds || []
+            })
 
             if (response.success && response.data) {
                 replaceMessage(groupId, tempMessage.id, normalizeGroupMessage(response.data))
@@ -716,6 +822,7 @@ export const useChatStore = defineStore('chat', () => {
      * 标准化消息格式
      */
     function normalizeMessage(message) {
+        const parsedExtra = parseMessageExtra(message.extra)
         const normalized = {
             id: message.id,
             from_user_id: Number(message.from_user_id || message.fromUserId),
@@ -726,7 +833,8 @@ export const useChatStore = defineStore('chat', () => {
             is_recalled: Number(message.is_recalled) === 1 ? 1 : 0,
             recall_at: message.recall_at || null,
             quote_message_id: message.quote_message_id || null,
-            extra: message.extra || null,
+            quote: parsedExtra?.quote || null,
+            extra: parsedExtra,
             created_at: message.created_at || message.createdAt || new Date().toISOString(),
             from_nickname: message.from_nickname,
             from_avatar: message.from_avatar,
@@ -746,6 +854,7 @@ export const useChatStore = defineStore('chat', () => {
      * 标准化群消息格式
      */
     function normalizeGroupMessage(message) {
+        const parsedExtra = parseMessageExtra(message.extra)
         const normalized = {
             id: message.id,
             from_user_id: Number(message.from_user_id || message.fromUserId),
@@ -755,7 +864,8 @@ export const useChatStore = defineStore('chat', () => {
             is_recalled: Number(message.is_recalled) === 1 ? 1 : 0,
             recall_at: message.recall_at || null,
             quote_message_id: message.quote_message_id || null,
-            extra: message.extra || null,
+            quote: parsedExtra?.quote || null,
+            extra: parsedExtra,
             created_at: message.created_at || message.createdAt || new Date().toISOString(),
             from_nickname: message.from_nickname,
             from_avatar: message.from_avatar
@@ -861,6 +971,8 @@ export const useChatStore = defineStore('chat', () => {
         createGroup,
         joinGroup,
         leaveGroup,
+        updateGroupInfo,
+        saveGroupAnnouncement,
         markAsRead,
         recallMessage,
         setCurrentSession,

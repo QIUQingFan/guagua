@@ -84,7 +84,7 @@
               <div class="author-avatar-container">
                 <img :src="authorData.avatar" :alt="authorData.name" class="author-avatar "
                   @click="onUserClick(authorData.id)" v-user-hover="getAuthorUserHoverConfig()"
-                  @error="handleAvatarError" v-img-fallback="avatar" />
+                  @error="handleAvatarError" v-img-fallback="'avatar'" />
                 <VerifiedBadge :verified="authorData.verified" size="medium" class="author-verified-badge" />
               </div>
               <div class="author-name-container">
@@ -205,7 +205,7 @@
                   <div class="comment-avatar-container">
                     <img :src="comment.avatar" :alt="comment.username" class="comment-avatar clickable-avatar"
                       @click="onUserClick(comment.user_id)" @error="handleAvatarError"
-                      v-user-hover="getCommentUserHoverConfig(comment)" v-img-fallback="avatar" />
+                      v-user-hover="getCommentUserHoverConfig(comment)" v-img-fallback="'avatar'" />
                     <VerifiedBadge :verified="comment.verified || 0" size="small" class="comment-verified-badge" />
                   </div>
                   <div class="comment-content">
@@ -248,7 +248,7 @@
                         <div class="reply-avatar-container">
                           <img :src="reply.avatar" :alt="reply.username" class="reply-avatar "
                             @click="onUserClick(reply.user_id)" @error="handleAvatarError"
-                            v-user-hover="getCommentUserHoverConfig(reply)" v-img-fallback="avatar" />
+                            v-user-hover="getCommentUserHoverConfig(reply)" v-img-fallback="'avatar'" />
                           <VerifiedBadge :verified="reply.verified || 0" size="mini" class="reply-verified-badge" />
                         </div>
                         <div class="reply-content">
