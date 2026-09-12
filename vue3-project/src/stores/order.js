@@ -6,7 +6,10 @@ import {
     getOrderDetail,
     cancelOrder,
     confirmOrder,
-    getOrderLogs
+    getOrderLogs,
+    payOrder,
+    getPayStatus,
+    refundOrder
 } from '@/api/shop.js'
 
 /**
@@ -98,6 +101,45 @@ export const useOrderStore = defineStore('order', () => {
         return res
     }
 
+    /**
+     * 发起支付，返回支付跳转链接
+     */
+    async function pay(idOrNo) {
+        submitting.value = true
+        try {
+            return await payOrder(idOrNo)
+        } finally {
+            submitting.value = false
+        }
+    }
+
+    /**
+     * 查询支付结果
+     */
+    async function queryPayStatus(idOrNo) {
+        const res = await getPayStatus(idOrNo)
+        if (res.success && res.data?.paid && current.value?.id) {
+            await fetchDetail(getOrderKey(current.value))
+        }
+        return res
+    }
+
+    /**
+     * 申请退款
+     */
+    async function refund(idOrNo, data) {
+        submitting.value = true
+        try {
+            const res = await refundOrder(idOrNo, data)
+            if (res.success && current.value?.id) {
+                await fetchDetail(getOrderKey(current.value))
+            }
+            return res
+        } finally {
+            submitting.value = false
+        }
+    }
+
     function getOrderKey(order) {
         return order.order_no || order.id
     }
@@ -112,6 +154,7 @@ export const useOrderStore = defineStore('order', () => {
     return {
         list, total, current, logs, isLoading, submitting,
         placeOrder, fetchList, fetchDetail, fetchLogs,
-        cancel, confirm, getOrderKey, reset
+        cancel, confirm, pay, queryPayStatus, refund,
+        getOrderKey, reset
     }
 })

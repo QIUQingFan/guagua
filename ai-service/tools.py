@@ -368,12 +368,14 @@ def get_hot_products(limit: int = 5, range_key: str = "30d") -> str:
 
 
 @tool
-def extract_procurement_intent(user_input: str) -> str:
+def extract_procurement_intent(user_input: str, history: str = "") -> str:
     """
     Extract procurement intent from user input, including product query, budget, category, etc.
 
     Args:
         user_input: User's message
+        history: 最近对话历史（文本格式），当用户输入未指明具体商品但表达购买/下单意愿时，
+                 用于结合历史中 AI 推荐过的商品解析其想购买的目标商品
 
     Returns:
         JSON string containing extracted intent information
@@ -410,9 +412,13 @@ def extract_procurement_intent(user_input: str) -> str:
         '- "recommend": 用户表达「推荐」「有什么」「选哪个」「性价比」「值得买」等寻求建议（未指明要下单）\n'
         '- "none": 仅咨询、查订单、查政策等非购物意图\n'
         "注意：只要用户提到具体商品并表达购买/下单意愿，needs_product_help=true 且 action_type 为 buy_now 或 add_to_cart；"
-        "「下单」默认归为 buy_now。务必从用户输入中提取 product_query（商品名/关键词），否则无法定位商品。\n\n"
-        f"用户输入: {user_input}\n"
+        "「下单」默认归为 buy_now。务必从用户输入中提取 product_query（商品名/关键词），否则无法定位商品。\n"
+        "若用户当前输入未明确提到商品名，但表达了购买/下单意愿（如「下单」「就这个」「买它」「要这个」「来一份」），"
+        "请结合【最近对话历史】中 AI 推荐过/用户提到过的商品来推断 product_query，指向用户想购买的那款商品。\n"
     )
+    if history and history.strip():
+        prompt += f"\n最近对话历史：\n{history.strip()}\n"
+    prompt += f"\n用户输入: {user_input}\n"
 
     try:
         result = llm.invoke([{"role": "user", "content": prompt}])

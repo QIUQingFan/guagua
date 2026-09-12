@@ -54,7 +54,7 @@
             </td>
             <td>
               <div class="buyer">
-                <img v-if="item.user_avatar" :src="item.user_avatar" alt="" class="buyer-avatar" v-img-fallback="avatar" />
+                <img v-if="item.user_avatar" :src="item.user_avatar" alt="" class="buyer-avatar" v-img-fallback="'avatar'" />
                 <div class="buyer-info">
                   <div class="buyer-name">{{ item.user_nickname || '-' }}</div>
                   <div class="buyer-account muted">{{ item.user_account || item.user_id }}</div>
@@ -89,6 +89,7 @@
             <td class="action-cell">
               <button class="btn btn-sm btn-outline" @click="openDetail(item)">详情</button>
               <button v-if="canShip(item.status)" class="btn btn-sm btn-primary" @click="openShipModal(item)">发货</button>
+              <button v-if="canRefund(item)" class="btn btn-sm btn-danger" @click="confirmRefund(item)">退款</button>
               <button v-if="canClose(item.status)" class="btn btn-sm btn-danger" @click="confirmClose(item)">关闭</button>
             </td>
           </tr>
@@ -132,10 +133,6 @@
             <label class="form-label">物流单号 <span class="required">*</span></label>
             <input v-model="shipForm.tracking_no" type="text" class="form-input" placeholder="请输入物流单号" />
           </div>
-          <div v-if="shipTarget.status === 'pending_payment'" class="ship-tip">
-            <SvgIcon name="alert" class="tip-icon" />
-            <span>该订单当前为「待付款」，发货将视为已收款并自动记录付款时间。</span>
-          </div>
         </div>
         <div class="modal-footer">
           <button class="btn btn-outline" @click="closeShipModal">取消</button>
@@ -168,6 +165,9 @@
                 <div class="detail-item"><span class="dim">发货时间</span>{{ formatDate(detail.shipped_at) }}</div>
                 <div class="detail-item"><span class="dim">完成时间</span>{{ formatDate(detail.completed_at) }}</div>
                 <div class="detail-item"><span class="dim">买家备注</span>{{ detail.remark || '-' }}</div>
+                <div v-if="detail.trade_no" class="detail-item"><span class="dim">支付宝交易号</span>{{ detail.trade_no }}</div>
+                <div v-if="detail.refund_at" class="detail-item"><span class="dim">退款时间</span>{{ formatDate(detail.refund_at) }}</div>
+                <div v-if="detail.refund_reason" class="detail-item full"><span class="dim">退款原因</span>{{ detail.refund_reason }}</div>
               </div>
             </div>
 
@@ -202,6 +202,9 @@
                 <div class="amount-row"><span>商品总额</span><span>¥{{ detail.total_amount }}</span></div>
                 <div class="amount-row"><span>运费</span><span>¥{{ detail.shipping_fee }}</span></div>
                 <div class="amount-row amount-total"><span>应付金额</span><span>¥{{ detail.pay_amount }}</span></div>
+                <div v-if="detail.refund_status === 'refunded'" class="amount-row amount-refund">
+                  <span>已退款</span><span>¥{{ detail.refund_amount }}</span>
+                </div>
               </div>
             </div>
 
@@ -251,7 +254,8 @@ import {
   adminGetOrders,
   adminGetOrderDetail,
   adminShipOrder,
-  adminCloseOrder
+  adminCloseOrder,
+  adminRefundOrder
 } from '@/api/shop.js'
 
 const STATUS_OPTIONS = [
@@ -260,18 +264,20 @@ const STATUS_OPTIONS = [
   { value: 'pending_shipment', label: '待发货' },
   { value: 'shipped', label: '待收货' },
   { value: 'completed', label: '已完成' },
+  { value: 'refunded', label: '已退款' },
   { value: 'cancelled', label: '已取消' },
   { value: 'closed', label: '已关闭' }
 ]
 
 const STATUS_CLASS_MAP = {
   pending_payment: 'tag-warn', pending_shipment: 'tag-pending', shipped: 'tag-info',
-  completed: 'tag-on', cancelled: 'tag-off', closed: 'tag-draft'
+  completed: 'tag-on', cancelled: 'tag-off', closed: 'tag-draft', refunded: 'tag-draft'
 }
 const statusClass = (s) => STATUS_CLASS_MAP[s] || 'tag-off'
 
-const canShip = (s) => s === 'pending_payment' || s === 'pending_shipment'
+const canShip = (s) => s === 'pending_shipment'
 const canClose = (s) => s === 'shipped' || s === 'completed'
+const canRefund = (item) => ['pending_shipment', 'shipped', 'completed'].includes(item.status) && item.refund_status !== 'refunded'
 
 const list = ref([])
 const loading = ref(false)
@@ -415,6 +421,26 @@ const confirmClose = async (item) => {
     }
   } catch (e) {
     messageManager.error('关闭失败')
+  }
+}
+
+const confirmRefund = async (item) => {
+  const reason = prompt(
+    `确定对订单「${item.order_no}」发起全额退款（¥${item.pay_amount}）吗？\n款项将原路退回买家支付宝账户。\n（可选）填写退款原因：`,
+    ''
+  )
+  if (reason === null) return
+  const payload = reason === '' ? {} : { reason }
+  try {
+    const res = await adminRefundOrder(item.id, payload)
+    if (res.success) {
+      messageManager.success('退款成功，款项已原路退回买家')
+      fetchList()
+    } else {
+      messageManager.error(res.message || '退款失败')
+    }
+  } catch (e) {
+    messageManager.error('退款失败')
   }
 }
 
@@ -924,24 +950,6 @@ onBeforeUnmount(() => {
   border-color: var(--primary-color);
 }
 
-.ship-tip {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 10px 12px;
-  background-color: rgba(230, 162, 60, 0.1);
-  border-radius: 6px;
-  font-size: 13px;
-  color: #E6A23C;
-}
-
-.tip-icon {
-  width: 16px;
-  height: 16px;
-  flex-shrink: 0;
-  margin-top: 1px;
-}
-
 .modal-footer {
   padding: 16px 24px 20px;
   display: flex;
@@ -1077,6 +1085,12 @@ onBeforeUnmount(() => {
   color: var(--danger-color);
   font-weight: 600;
   font-size: 17px;
+}
+
+.amount-refund span:last-child {
+  color: #E6A23C;
+  font-weight: 600;
+  font-size: 15px;
 }
 
 .timeline {

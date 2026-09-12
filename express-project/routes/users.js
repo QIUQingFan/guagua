@@ -1,4 +1,4 @@
-﻿const express = require('express');
+const express = require('express');
 const router = express.Router();
 const { HTTP_STATUS, RESPONSE_CODES, ERROR_MESSAGES } = require('../constants');
 const { pool } = require('../config/config');
@@ -102,8 +102,8 @@ router.get('/:id/personality-tags', async (req, res) => {
   try {
     const userIdParam = req.params.id;
     
-    const query = 'SELECT gender, zodiac_sign, mbti, education, major, interests FROM users WHERE user_id = ?';
-    const params = [userIdParam];
+    const query = 'SELECT gender, zodiac_sign, mbti, education, major, interests FROM users WHERE id = ? OR user_id = ?';
+    const params = [userIdParam, userIdParam];
 
     const [rows] = await pool.execute(query, params);
 
@@ -145,8 +145,8 @@ router.get('/:id', async (req, res) => {
     const userIdParam = req.params.id;
     
     const [rows] = await pool.execute(
-      'SELECT * FROM users WHERE user_id = ?',
-      [userIdParam]
+      'SELECT * FROM users WHERE id = ? OR user_id = ?',
+      [userIdParam, userIdParam]
     );
 
     if (rows.length === 0) {
@@ -229,7 +229,7 @@ router.get('/:id/posts', optionalAuth, async (req, res) => {
     const sort = req.query.sort || 'created_at';
 
     
-    const [userRows] = await pool.execute('SELECT id FROM users WHERE user_id = ?', [userIdParam]);
+    const [userRows] = await pool.execute('SELECT * FROM users WHERE id = ? OR user_id = ?', [userIdParam, userIdParam]);
     if (userRows.length === 0) {
       return res.status(HTTP_STATUS.NOT_FOUND).json({ code: RESPONSE_CODES.NOT_FOUND, message: '用户不存在' });
     }
@@ -348,7 +348,7 @@ router.get('/:id/collections', optionalAuth, async (req, res) => {
     const currentUserId = req.user ? req.user.id : null;
 
     
-    const [userRows] = await pool.execute('SELECT id FROM users WHERE user_id = ?', [userIdParam]);
+    const [userRows] = await pool.execute('SELECT * FROM users WHERE id = ? OR user_id = ?', [userIdParam, userIdParam]);
     if (userRows.length === 0) {
       return res.status(HTTP_STATUS.NOT_FOUND).json({ code: RESPONSE_CODES.NOT_FOUND, message: '用户不存在' });
     }
@@ -444,7 +444,7 @@ router.get('/:id/likes', optionalAuth, async (req, res) => {
     const currentUserId = req.user ? req.user.id : null;
 
     
-    const [userRows] = await pool.execute('SELECT id FROM users WHERE user_id = ?', [userIdParam]);
+    const [userRows] = await pool.execute('SELECT * FROM users WHERE id = ? OR user_id = ?', [userIdParam, userIdParam]);
     if (userRows.length === 0) {
       return res.status(HTTP_STATUS.NOT_FOUND).json({ code: RESPONSE_CODES.NOT_FOUND, message: '用户不存在' });
     }
@@ -539,7 +539,7 @@ router.post('/:id/follow', authenticateToken, async (req, res) => {
 
     
     
-    const [userRows] = await pool.execute('SELECT id FROM users WHERE user_id = ?', [userIdParam]);
+    const [userRows] = await pool.execute('SELECT * FROM users WHERE id = ? OR user_id = ?', [userIdParam, userIdParam]);
     if (userRows.length === 0) {
       return res.status(HTTP_STATUS.NOT_FOUND).json({ code: RESPONSE_CODES.NOT_FOUND, message: '用户不存在' });
     }
@@ -595,7 +595,7 @@ router.delete('/:id/follow', authenticateToken, async (req, res) => {
     const followerId = req.user.id;
 
     
-    const [userRows] = await pool.execute('SELECT id FROM users WHERE user_id = ?', [userIdParam]);
+    const [userRows] = await pool.execute('SELECT * FROM users WHERE id = ? OR user_id = ?', [userIdParam, userIdParam]);
     if (userRows.length === 0) {
       return res.status(HTTP_STATUS.NOT_FOUND).json({ code: RESPONSE_CODES.NOT_FOUND, message: '用户不存在' });
     }
@@ -641,7 +641,7 @@ router.get('/:id/follow-status', optionalAuth, async (req, res) => {
 
     
     
-    const [userRows] = await pool.execute('SELECT id FROM users WHERE user_id = ?', [userIdParam]);
+    const [userRows] = await pool.execute('SELECT * FROM users WHERE id = ? OR user_id = ?', [userIdParam, userIdParam]);
     if (userRows.length === 0) {
       return res.status(HTTP_STATUS.NOT_FOUND).json({ code: RESPONSE_CODES.NOT_FOUND, message: '用户不存在' });
     }
@@ -706,7 +706,7 @@ router.get('/:id/following', optionalAuth, async (req, res) => {
     const currentUserId = req.user ? req.user.id : null;
 
     
-    const [userRows] = await pool.execute('SELECT id FROM users WHERE user_id = ?', [userIdParam]);
+    const [userRows] = await pool.execute('SELECT * FROM users WHERE id = ? OR user_id = ?', [userIdParam, userIdParam]);
     if (userRows.length === 0) {
       return res.status(HTTP_STATUS.NOT_FOUND).json({ code: RESPONSE_CODES.NOT_FOUND, message: '用户不存在' });
     }
@@ -802,7 +802,7 @@ router.get('/:id/followers', optionalAuth, async (req, res) => {
     console.log(`获取粉丝列表 - 用户ID: ${userIdParam}, 当前用户ID: ${currentUserId}`);
 
     
-    const [userRows] = await pool.execute('SELECT id FROM users WHERE user_id = ?', [userIdParam]);
+    const [userRows] = await pool.execute('SELECT * FROM users WHERE id = ? OR user_id = ?', [userIdParam, userIdParam]);
     if (userRows.length === 0) {
       return res.status(HTTP_STATUS.NOT_FOUND).json({ code: RESPONSE_CODES.NOT_FOUND, message: '用户不存在' });
     }
@@ -892,7 +892,7 @@ router.get('/:id/mutual-follows', optionalAuth, async (req, res) => {
     console.log(`获取互关列表 - 用户ID: ${userIdParam}, 当前用户ID: ${currentUserId}`);
 
     
-    const [userRows] = await pool.execute('SELECT id FROM users WHERE user_id = ?', [userIdParam]);
+    const [userRows] = await pool.execute('SELECT * FROM users WHERE id = ? OR user_id = ?', [userIdParam, userIdParam]);
     if (userRows.length === 0) {
       return res.status(HTTP_STATUS.NOT_FOUND).json({ code: RESPONSE_CODES.NOT_FOUND, message: '用户不存在' });
     }
@@ -999,7 +999,7 @@ router.get('/:id/stats', async (req, res) => {
     console.log(`获取用户统计信息 - 用户ID: ${userIdParam}`);
 
     
-    const [userRows] = await pool.execute('SELECT id FROM users WHERE user_id = ?', [userIdParam]);
+    const [userRows] = await pool.execute('SELECT * FROM users WHERE id = ? OR user_id = ?', [userIdParam, userIdParam]);
     if (userRows.length === 0) {
       return res.status(HTTP_STATUS.NOT_FOUND).json({ code: RESPONSE_CODES.NOT_FOUND, message: '用户不存在' });
     }
@@ -1061,7 +1061,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
     console.log(`用户更新资料 - 目标用户ID: ${userIdParam}, 当前用户ID: ${currentUserId}`);
 
     
-    const [userRows] = await pool.execute('SELECT id FROM users WHERE user_id = ?', [userIdParam]);
+    const [userRows] = await pool.execute('SELECT * FROM users WHERE id = ? OR user_id = ?', [userIdParam, userIdParam]);
     if (userRows.length === 0) {
       return res.status(HTTP_STATUS.NOT_FOUND).json({ code: RESPONSE_CODES.NOT_FOUND, message: '用户不存在' });
     }
@@ -1176,7 +1176,7 @@ router.put('/:id/password', authenticateToken, async (req, res) => {
     }
 
     
-    const [userRows] = await pool.execute('SELECT id FROM users WHERE user_id = ?', [userIdParam]);
+    const [userRows] = await pool.execute('SELECT * FROM users WHERE id = ? OR user_id = ?', [userIdParam, userIdParam]);
     if (userRows.length === 0) {
       return res.status(HTTP_STATUS.NOT_FOUND).json({ code: RESPONSE_CODES.NOT_FOUND, message: '用户不存在' });
     }

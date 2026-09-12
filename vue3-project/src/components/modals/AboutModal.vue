@@ -27,7 +27,7 @@
             <h3>开发者</h3>
             <a href="https://github.com/QIUFAN" target="_blank" class="author-link">
               <div class="author-info">
-                <img class="author-avatar" :src="qiufanUrl" alt="QIUFAN" v-img-fallback="avatar">
+                <img class="author-avatar" :src="qiufanUrl" alt="QIUFAN" v-img-fallback="'avatar'">
                 <div class="author-details">
                   <p class="author-name">@QIUFAN</p>
                   <p class="author-desc">全栈开发者</p>

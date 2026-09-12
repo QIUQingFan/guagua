@@ -8,6 +8,7 @@ import { useAuthStore } from '@/stores/auth.js'
 import SvgIcon from '@/components/SvgIcon.vue'
 import { showShopMessage } from '@/utils/shopMessage.js'
 import { reportView, reportCart } from '@/api/behavior.js'
+import { sanitizeRichText } from '@/utils/contentSecurity.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -53,6 +54,10 @@ const availableStock = computed(() => {
 
 const isOnSale = computed(() => product.value?.status === 'on_sale')
 const isFavorited = computed(() => Boolean(product.value?.is_favorited))
+
+const safeDescription = computed(() =>
+    sanitizeRichText(product.value?.description || '')
+)
 
 function selectImage(index) {
     currentImageIndex.value = index
@@ -269,7 +274,7 @@ onMounted(() => {
 
             <section v-if="product.description" class="desc-section">
                 <h2 class="block-title">商品详情</h2>
-                <div class="desc-content">{{ product.description }}</div>
+                <div class="desc-content" v-html="safeDescription"></div>
             </section>
 
             <section v-if="product.related && product.related.length" class="related-section">
@@ -600,7 +605,69 @@ onMounted(() => {
     font-size: 14px;
     line-height: 1.8;
     color: var(--text-color-secondary);
-    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.desc-content :deep(p) {
+    margin: 0 0 12px;
+}
+
+.desc-content :deep(p:last-child) {
+    margin-bottom: 0;
+}
+
+.desc-content :deep(img) {
+    max-width: 100%;
+    height: auto;
+    border-radius: 8px;
+    display: block;
+    margin: 12px auto;
+}
+
+.desc-content :deep(ul),
+.desc-content :deep(ol) {
+    padding-left: 20px;
+    margin: 0 0 12px;
+}
+
+.desc-content :deep(li) {
+    margin-bottom: 4px;
+}
+
+.desc-content :deep(h1),
+.desc-content :deep(h2),
+.desc-content :deep(h3),
+.desc-content :deep(h4),
+.desc-content :deep(h5),
+.desc-content :deep(h6) {
+    color: var(--text-color-primary);
+    margin: 16px 0 8px;
+    line-height: 1.4;
+}
+
+.desc-content :deep(a) {
+    color: var(--primary-color);
+    text-decoration: underline;
+}
+
+.desc-content :deep(blockquote) {
+    border-left: 3px solid var(--border-color-secondary);
+    margin: 12px 0;
+    padding: 4px 12px;
+    color: var(--text-color-tertiary);
+}
+
+.desc-content :deep(table) {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0;
+}
+
+.desc-content :deep(th),
+.desc-content :deep(td) {
+    border: 1px solid var(--border-color-secondary);
+    padding: 6px 10px;
+    text-align: left;
 }
 
 .related-grid {

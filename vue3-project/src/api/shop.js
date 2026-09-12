@@ -148,6 +148,31 @@ export function confirmOrder(idOrNo) {
     return request.post(`/orders/${idOrNo}/confirm`)
 }
 
+/**
+ * 发起支付宝支付，返回收银台跳转链接
+ * @param {string} idOrNo 订单id或订单号
+ */
+export function payOrder(idOrNo) {
+    return request.post(`/orders/${idOrNo}/pay`)
+}
+
+/**
+ * 查询支付结果
+ * @param {string} idOrNo 订单id或订单号
+ */
+export function getPayStatus(idOrNo) {
+    return request.get(`/orders/${idOrNo}/pay-status`)
+}
+
+/**
+ * 申请退款
+ * @param {string} idOrNo 订单id或订单号
+ * @param {Object} data { reason }
+ */
+export function refundOrder(idOrNo, data = {}) {
+    return request.post(`/orders/${idOrNo}/refund`, data)
+}
+
 export function getOrderLogs(idOrNo) {
     return request.get(`/orders/${idOrNo}/logs`)
 }
@@ -201,6 +226,15 @@ export function adminShipOrder(id, data) {
 
 export function adminCloseOrder(id, data) {
     return request.post(`/admin/orders/${id}/close`, data)
+}
+
+/**
+ * 管理端 - 订单退款
+ * @param {string|number} id 订单id或订单号
+ * @param {Object} data { reason }
+ */
+export function adminRefundOrder(id, data = {}) {
+    return request.post(`/admin/orders/${id}/refund`, data)
 }
 
 export default {

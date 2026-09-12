@@ -41,7 +41,7 @@ const upsertSession = async (userId, targetId, sessionType, lastMessage, increme
 const sendMessage = async (socket, data, callback) => {
     try {
         const fromUserId = socket.userId;
-        const { toUserId, content, type = 1, share_id, share_title, share_cover } = data;
+        const { toUserId, content, type = 1, share_id, share_title, share_cover, quote_message_id, quote } = data;
 
         if (!toUserId) {
             return safeCallback(callback, { success: false, error: '缺少接收者ID' });
@@ -56,9 +56,21 @@ const sendMessage = async (socket, data, callback) => {
             return safeCallback(callback, { success: false, error: '不能给自己发送消息' });
         }
 
+        // 构建扩展数据（引用快照）
+        let extra = null;
+        if (quote && quote.id) {
+            extra = {
+                quote: {
+                    id: Number(quote.id),
+                    content: quote.content ? String(quote.content).slice(0, 500) : '',
+                    from_nickname: quote.from_nickname || ''
+                }
+            };
+        }
+
         const [result] = await pool.execute(
-            'INSERT INTO private_messages (from_user_id, to_user_id, content, type, share_id, share_title, share_cover) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            [fromUserId, toUserId, content, type, share_id || null, share_title || null, share_cover || null]
+            'INSERT INTO private_messages (from_user_id, to_user_id, content, type, share_id, share_title, share_cover, quote_message_id, extra) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [fromUserId, toUserId, content, type, share_id || null, share_title || null, share_cover || null, quote_message_id || null, extra ? JSON.stringify(extra) : null]
         );
 
         const [users] = await pool.execute(
@@ -77,6 +89,8 @@ const sendMessage = async (socket, data, callback) => {
             share_id: share_id || null,
             share_title: share_title || null,
             share_cover: share_cover || null,
+            quote_message_id: quote_message_id || null,
+            extra: extra,
             is_read: 0,
             created_at: new Date().toISOString(),
             from_nickname: fromUser.nickname || null,

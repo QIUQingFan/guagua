@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import { useChatStore } from '@/stores/chat'
 import { formatTime } from '@/utils/timeFormat.js'
 import { resolveSessionName } from '@/utils/chatUserResolver.js'
+import GroupAvatar from './GroupAvatar.vue'
 
 const props = defineProps({
   activeId: {
@@ -68,7 +69,15 @@ const formatLastMessage = (content) => {
         :class="{ active: isActive(session) }"
         @click="handleSelect(session)"
       >
+        <GroupAvatar
+          v-if="Number(session.session_type) === 2 && !session.target_avatar"
+          :avatars="session.member_avatars || []"
+          :size="48"
+          :fallback="defaultAvatar"
+          class="session-avatar"
+        />
         <img
+          v-else
           :src="sessionAvatar(session)"
           class="session-avatar"
           alt="头像"

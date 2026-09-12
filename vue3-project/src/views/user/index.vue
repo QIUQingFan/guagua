@@ -183,7 +183,7 @@ const fixedSliderStyle = computed(() => {
     
     
     return {
-      left: `calc(240px + (100vw - 240px - 192px) / 2 + ${index * 64}px)`
+      left: `calc(228px + (100vw - 228px - 192px) / 2 + ${index * 64}px)`
     }
   } else {
     return {
@@ -267,7 +267,7 @@ function handleCollect(data) {
     <div class="user-info" v-if="userStore.isLoggedIn">
       <div class="basic-info">
         <img :src="userStore.userInfo?.avatar || defaultAvatar" :alt="userStore.userInfo?.nickname || '用户头像'"
-          class="avatar" @click="previewAvatar" @error="handleAvatarError" v-img-fallback="avatar">
+          class="avatar" @click="previewAvatar" @error="handleAvatarError" v-img-fallback="'avatar'">
         <div class="user-basic">
           <div class="user-nickname">
             <span>{{ userStore.userInfo?.nickname || '用户' }}</span>
@@ -789,7 +789,7 @@ function handleCollect(data) {
   }
 
   .fixedTab {
-    padding-left: 240px;
+    padding-left: 228px;
   }
 
   .content-item {

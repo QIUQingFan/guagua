@@ -90,7 +90,7 @@ const fixedSliderStyle = computed(() => {
 
   if (isLargeScreen) {
     return {
-      left: `calc(220px + (100vw - 220px - 128px) / 2 + ${index * 64}px)`
+      left: `calc(228px + (100vw - 228px - 128px) / 2 + ${index * 64}px)`
     }
   } else {
     return {
@@ -752,7 +752,7 @@ onMounted(async () => {
 @media (min-width: 901px) {
 
   .user-info {
-    max-width: 650px;
+    max-width: 1000px;
     margin: 0 auto;
     padding: 16px 0px;
   }
@@ -774,7 +774,7 @@ onMounted(async () => {
   }
 
   .fixedTab {
-    padding-left: 220px;
+    padding-left: 228px;
   }
 
   .content-item {

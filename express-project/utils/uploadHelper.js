@@ -242,9 +242,15 @@ async function uploadImage(fileBuffer, filename, mimetype) {
   if (strategy === 'local') {
     return await saveImageToLocal(fileBuffer, filename);
   } else if (strategy === 'r2') {
-    return await uploadImageToR2(fileBuffer, filename, mimetype);
+    const result = await uploadImageToR2(fileBuffer, filename, mimetype);
+    if (result.success) return result;
+    console.warn('R2 图片上传失败，回退本地存储:', result.message);
+    return await saveImageToLocal(fileBuffer, filename);
   } else if (strategy === 'oss') {
-    return await uploadImageToOSS(fileBuffer, filename, mimetype);
+    const result = await uploadImageToOSS(fileBuffer, filename, mimetype);
+    if (result.success) return result;
+    console.warn('OSS 图片上传失败，回退本地存储:', result.message);
+    return await saveImageToLocal(fileBuffer, filename);
   } else {
     return {
       success: false,
@@ -266,9 +272,15 @@ async function uploadVideo(fileBuffer, filename, mimetype) {
   if (strategy === 'local') {
     return await saveVideoToLocal(fileBuffer, filename);
   } else if (strategy === 'r2') {
-    return await uploadVideoToR2(fileBuffer, filename, mimetype);
+    const result = await uploadVideoToR2(fileBuffer, filename, mimetype);
+    if (result.success) return result;
+    console.warn('R2 视频上传失败，回退本地存储:', result.message);
+    return await saveVideoToLocal(fileBuffer, filename);
   } else if (strategy === 'oss') {
-    return await uploadVideoToOSS(fileBuffer, filename, mimetype);
+    const result = await uploadVideoToOSS(fileBuffer, filename, mimetype);
+    if (result.success) return result;
+    console.warn('OSS 视频上传失败，回退本地存储:', result.message);
+    return await saveVideoToLocal(fileBuffer, filename);
   } else {
     return {
       success: false,

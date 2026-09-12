@@ -1,7 +1,9 @@
 <template>
   <Teleport to="body">
     <transition name="ai-fab-pop">
-      <button v-show="!isOpen && shouldShow" class="ai-fab" @click="openPanel" aria-label="AI 智能客服">
+      <button v-show="!isOpen && shouldShow" class="ai-fab" :class="{ 'ai-fab--dragging': isDragging }"
+              :style="fabStyle" @click="openPanel" @mousedown="onDragStart"
+              @touchstart.passive="onTouchStart" aria-label="AI 智能客服">
       <svg viewBox="0 0 24 24" class="ai-fab-icon" fill="none">
         <path d="M12 2L13.5 8.5L20 10L13.5 11.5L12 18L10.5 11.5L4 10L10.5 8.5L12 2Z"
               fill="currentColor" />
@@ -89,6 +91,12 @@
             </svg>
           </span>
           <div class="ai-msg-content">
+            <div v-if="msg.role === 'assistant' && isLoading && streamingIndex === i && !msg.content && !msg.action"
+                 class="ai-msg-bubble ai-typing-bubble">
+              <span class="ai-typing-dot"></span><span class="ai-typing-dot"></span><span class="ai-typing-dot"></span>
+              <span class="ai-typing-label">{{ thinkingText }}</span>
+            </div>
+            <template v-else>
             <div v-if="msg.role === 'assistant'" class="ai-msg-bubble ai-markdown"
                  v-html="renderMarkdown(msg.content)" @click="handleCitationClick($event, i)"></div>
             <div v-else class="ai-msg-bubble">{{ msg.content }}</div>
@@ -131,13 +139,10 @@
               <button class="ai-fb-btn" :class="{ active: msg.my_rating === -1 }"
                       :disabled="msg.feedback_pending" @click="submitFeedback(msg, -1)" title="无帮助">👎</button>
             </div>
+            </template>
           </div>
         </div>
 
-        
-        <div v-if="isLoading && !streamingIndex" class="ai-typing">
-          <span></span><span></span><span></span>
-        </div>
         </template>
       </main>
 
@@ -145,16 +150,22 @@
       <footer class="ai-footer">
         <div class="ai-input-wrap">
           <input v-model="inputText" class="ai-input" placeholder="输入你的问题…"
-                 @keyup.enter="sendMessage" :disabled="isLoading" />
-          <button class="ai-send" @click="sendMessage" :disabled="isLoading || !inputText.trim()">
-            <svg v-if="!isLoading" viewBox="0 0 24 24" fill="currentColor" class="ai-send-icon">
+                 @keyup.enter="handleEnter" />
+          <button v-if="isLoading" class="ai-send ai-send--stop" @click="stopGenerating"
+                  title="停止生成" aria-label="停止生成">
+            <svg viewBox="0 0 24 24" class="ai-send-icon" fill="currentColor">
+              <rect x="6" y="6" width="12" height="12" rx="2" />
+            </svg>
+          </button>
+          <button v-else class="ai-send" @click="sendMessage" :disabled="!inputText.trim()">
+            <svg viewBox="0 0 24 24" fill="currentColor" class="ai-send-icon">
               <path d="M2 21l21-9L2 3v7l15 2-15 2v7z" />
             </svg>
-            <span v-else class="ai-spinner"></span>
           </button>
         </div>
         <p class="ai-hint">
-          <span v-if="!isLoggedIn">🎟️ 游客模式 · 登录后可查订单</span>
+          <span v-if="isLoading">回复中可点击「停止」中断，然后直接输入新问题</span>
+          <span v-else-if="!isLoggedIn">🎟️ 游客模式 · 登录后可查订单</span>
           <span v-else>💡 Enter 发送 · 对话由 AI 生成</span>
         </p>
       </footer>
@@ -188,8 +199,101 @@ const showList = ref(false)
 const convList = ref([])
 const convLoading = ref(false)
 let abortCtrl = null 
+let streamSeq = 0 
 
-const shouldShow = computed(() => !route.path.startsWith('/admin'))
+// 悬浮球拖拽状态
+const isDragging = ref(false)
+const fabPos = ref(null)
+const FAB_SIZE = 56
+let dragState = null
+let dragMoved = false
+
+const fabStyle = computed(() => {
+  if (!fabPos.value) return {}
+  return { left: `${fabPos.value.left}px`, top: `${fabPos.value.top}px`, right: 'auto', bottom: 'auto' }
+})
+
+function clampFab(x, y) {
+  const w = window.innerWidth
+  const h = window.innerHeight
+  return {
+    left: Math.max(8, Math.min(x, w - FAB_SIZE - 8)),
+    top: Math.max(8, Math.min(y, h - FAB_SIZE - 8)),
+  }
+}
+
+function onDragStart(e) {
+  if (e.button !== 0) return
+  dragMoved = false
+  isDragging.value = true
+  const start = fabPos.value ? { left: fabPos.value.left, top: fabPos.value.top } : { left: window.innerWidth - 24 - FAB_SIZE, top: window.innerHeight - 24 - FAB_SIZE }
+  dragState = { startX: e.clientX, startY: e.clientY, left: start.left, top: start.top }
+  document.body.style.userSelect = 'none'
+  window.addEventListener('mousemove', onDragMove)
+  window.addEventListener('mouseup', onDragEnd)
+}
+
+function onDragMove(e) {
+  if (!dragState) return
+  const dx = e.clientX - dragState.startX
+  const dy = e.clientY - dragState.startY
+  if (Math.abs(dx) > 3 || Math.abs(dy) > 3) dragMoved = true
+  fabPos.value = clampFab(dragState.left + dx, dragState.top + dy)
+}
+
+function onDragEnd(e) {
+  if (!dragState) return
+  dragState = null
+  isDragging.value = false
+  document.body.style.userSelect = ''
+  window.removeEventListener('mousemove', onDragMove)
+  window.removeEventListener('mouseup', onDragEnd)
+}
+
+function onTouchStart(e) {
+  const t = e.touches[0]
+  if (!t) return
+  isDragging.value = true
+  const start = fabPos.value ? { left: fabPos.value.left, top: fabPos.value.top } : { left: window.innerWidth - 24 - FAB_SIZE, top: window.innerHeight - 24 - FAB_SIZE }
+  dragState = { startX: t.clientX, startY: t.clientY, left: start.left, top: start.top }
+  const onMove = (ev) => {
+    const tt = ev.touches[0]
+    if (!tt || !dragState) return
+    const dx = tt.clientX - dragState.startX
+    const dy = tt.clientY - dragState.startY
+    fabPos.value = clampFab(dragState.left + dx, dragState.top + dy)
+  }
+  const onEnd = () => {
+    dragState = null
+    isDragging.value = false
+    window.removeEventListener('touchmove', onMove)
+    window.removeEventListener('touchend', onEnd)
+  }
+  window.addEventListener('touchmove', onMove, { passive: true })
+  window.addEventListener('touchend', onEnd)
+}
+
+const THINKING_PHRASES = ['正在思考…', '正在查找商品…', '正在为你整理答案…']
+const thinkingText = ref(THINKING_PHRASES[0])
+let thinkingTimer = null
+function startThinking() {
+  stopThinking()
+  let idx = 0
+  thinkingText.value = THINKING_PHRASES[0]
+  thinkingTimer = setInterval(() => {
+    idx = (idx + 1) % THINKING_PHRASES.length
+    thinkingText.value = THINKING_PHRASES[idx]
+  }, 2000)
+}
+function stopThinking() {
+  if (thinkingTimer) {
+    clearInterval(thinkingTimer)
+    thinkingTimer = null
+  }
+  thinkingText.value = THINKING_PHRASES[0]
+}
+
+const shouldShow = computed(() => route.path.startsWith('/shop'))
 const isLoggedIn = computed(() => userStore.isLoggedIn)
 
 const suggestions = [
@@ -332,6 +436,7 @@ async function submitFeedback(msg, rating) {
 }
 
 function openPanel() {
+  if (dragMoved) { dragMoved = false; return }
   isOpen.value = true
   hasNew.value = false
   scrollToBottom()
@@ -350,7 +455,7 @@ function formatConvTime(ts) {
   const min = Math.floor(diff / 60000)
   if (min < 1) return '刚刚'
   if (min < 60) return `${min} 分钟前`
-  const hr = Math.floor(min / 3600000)
+  const hr = Math.floor(min / 60)
   if (hr < 24) return `${hr} 小时前`
   const day = Math.floor(hr / 24)
   if (day < 7) return `${day} 天前`
@@ -384,6 +489,8 @@ function toggleList() {
 
 function newConversation() {
   if (abortCtrl) abortCtrl.abort()
+  streamSeq++
+  stopThinking()
   showList.value = false
   conversationId.value = null
   messages.value = []
@@ -397,6 +504,8 @@ function newConversation() {
 async function switchConversation(conv) {
   if (convLoading.value) return
   if (abortCtrl) abortCtrl.abort()
+  streamSeq++
+  stopThinking()
   isLoading.value = false
   streamingIndex.value = null
   abortCtrl = null
@@ -451,11 +560,48 @@ async function sendQuick(text) {
   await sendMessage()
 }
 
+function handleEnter(e) {
+  // 中文输入法组词确认时不触发发送
+  if (e.isComposing) return
+  sendMessage()
+}
+
+/** 停止当前 AI 生成（保留已生成的部分内容） */
+function stopGenerating() {
+  if (!isLoading.value) return
+  const idx = streamingIndex.value
+  const msg = idx != null ? messages.value[idx] : null
+  streamSeq++ // 使当前流失效，避免其 finally 清理后续新流的状态
+  if (abortCtrl) abortCtrl.abort()
+  if (msg && !msg.content && !msg.action) {
+    msg.content = '已停止生成，你可以重新输入问题。'
+  }
+  isLoading.value = false
+  streamingIndex.value = null
+  abortCtrl = null
+  stopThinking()
+  scrollToBottom()
+}
+
 async function sendMessage() {
   const text = inputText.value.trim()
-  if (!text || isLoading.value) return
+  if (!text) return
 
-  if (abortCtrl) abortCtrl.abort()
+  // AI 正在回复时发送新消息：先中断当前生成，再发送（支持「突然中断重新编辑问题」）
+  if (isLoading.value) {
+    const idx = streamingIndex.value
+    const msg = idx != null ? messages.value[idx] : null
+    if (abortCtrl) abortCtrl.abort()
+    if (msg && !msg.content && !msg.action) {
+      msg.content = '已停止生成，你重新输入了问题。'
+    }
+    isLoading.value = false
+    streamingIndex.value = null
+    abortCtrl = null
+    stopThinking()
+  }
+
+  const seq = ++streamSeq // 本次流的代次令牌，旧流结束后不得覆盖新流状态
   abortCtrl = new AbortController()
 
   messages.value.push({ role: 'user', content: text })
@@ -466,6 +612,7 @@ async function sendMessage() {
   messages.value.push(aiMsg)
   streamingIndex.value = messages.value.length - 1
   isLoading.value = true
+  startThinking()
 
   const history = messages.value
     .filter((m, i) => i < messages.value.length - 2) 
@@ -477,16 +624,25 @@ async function sendMessage() {
       { message: text, history, conversation_id: conversationId.value },
       {
         onToken: (t) => {
-          messages.value[streamingIndex.value].content += t
-          scrollToBottom()
+          if (seq !== streamSeq) return
+          const idx = streamingIndex.value
+          if (idx != null) {
+            messages.value[idx].content += t
+            scrollToBottom()
+          }
         },
         onAction: (a) => {
-          messages.value[streamingIndex.value].action = a
+          if (seq !== streamSeq) return
+          const idx = streamingIndex.value
+          if (idx != null) messages.value[idx].action = a
         },
         onSources: (srcs) => {
-          messages.value[streamingIndex.value].sources = srcs
+          if (seq !== streamSeq) return
+          const idx = streamingIndex.value
+          if (idx != null) messages.value[idx].sources = srcs
         },
         onMetadata: (m) => {
+          if (seq !== streamSeq) return
           if (m.conversation_id) conversationId.value = m.conversation_id
           
           if (m.message_id && streamingIndex.value != null) {
@@ -494,6 +650,7 @@ async function sendMessage() {
           }
         },
         onError: (err) => {
+          if (seq !== streamSeq) return
           const idx = streamingIndex.value
           if (messages.value[idx] && !messages.value[idx].content) {
             messages.value[idx].content = '😔 AI 服务暂时繁忙，请稍后再试。'
@@ -506,16 +663,20 @@ async function sendMessage() {
       abortCtrl.signal
     )
   } catch (err) {
-    if (err.name !== 'AbortError') {
+    if (err.name !== 'AbortError' && seq === streamSeq) {
       const idx = streamingIndex.value
       if (messages.value[idx] && !messages.value[idx].content) {
         messages.value[idx].content = '😔 AI 服务暂时繁忙，请稍后再试。'
       }
     }
   } finally {
-    isLoading.value = false
-    streamingIndex.value = null
-    abortCtrl = null
+    // 仅当仍是当前最新流时才清理全局状态，避免被中断的旧流覆盖新流
+    if (seq === streamSeq) {
+      isLoading.value = false
+      streamingIndex.value = null
+      abortCtrl = null
+      stopThinking()
+    }
     scrollToBottom()
   }
 }
@@ -536,15 +697,23 @@ onMounted(() => {
   border: none;
   background: linear-gradient(135deg, var(--primary-color), var(--primary-color-dark));
   color: #fff;
-  cursor: pointer;
+  cursor: grab;
   display: flex;
   align-items: center;
   justify-content: center;
   box-shadow: 0 4px 16px var(--primary-color-shadow);
   z-index: 9998;
   transition: transform 0.2s, box-shadow 0.2s;
+  touch-action: none;
 }
-.ai-fab:hover { transform: scale(1.08) translateY(-2px); box-shadow: 0 6px 24px var(--primary-color-shadow); }
+.ai-fab--dragging {
+  cursor: grabbing;
+  transform: scale(1.08);
+  box-shadow: 0 8px 28px var(--primary-color-shadow);
+  transition: none;
+  user-select: none;
+}
+.ai-fab:hover:not(.ai-fab--dragging) { transform: scale(1.08) translateY(-2px); box-shadow: 0 6px 24px var(--primary-color-shadow); }
 .ai-fab-icon { width: 28px; height: 28px; }
 .ai-fab-badge {
   position: absolute; top: -2px; right: -2px;
@@ -783,10 +952,20 @@ onMounted(() => {
   background: var(--primary-color);
 }
 
-.ai-typing { display: flex; gap: 4px; padding: 10px 14px; align-self: flex-start; background: var(--bg-color-primary); border-radius: 14px; border: 1px solid var(--border-color-primary); }
-.ai-typing span { width: 7px; height: 7px; border-radius: 50%; background: var(--text-color-tertiary); animation: ai-bounce 1.4s infinite ease-in-out; }
-.ai-typing span:nth-child(2) { animation-delay: 0.16s; }
-.ai-typing span:nth-child(3) { animation-delay: 0.32s; }
+.ai-typing-bubble {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ai-typing-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--text-color-tertiary);
+  animation: ai-bounce 1.4s infinite ease-in-out;
+}
+.ai-typing-dot:nth-child(2) { animation-delay: 0.16s; }
+.ai-typing-dot:nth-child(3) { animation-delay: 0.32s; }
+.ai-typing-label { font-size: 12px; color: var(--text-color-tertiary); margin-left: 2px; }
 @keyframes ai-bounce { 0%,80%,100%{transform:scale(0.6);opacity:0.4} 40%{transform:scale(1);opacity:1} }
 
 .ai-footer { padding: 10px 12px; border-top: 1px solid var(--border-color-primary); background: var(--bg-color-primary); }
@@ -817,15 +996,9 @@ onMounted(() => {
 }
 .ai-send:disabled { background: var(--disabled-bg); cursor: not-allowed; }
 .ai-send:not(:disabled):hover { background: var(--primary-color-dark); }
+.ai-send--stop { background: var(--series-negative, #ef4444); }
+.ai-send--stop:not(:disabled):hover { background: #dc2626; }
 .ai-send-icon { width: 18px; height: 18px; }
-.ai-spinner {
-  width: 16px; height: 16px;
-  border: 2px solid rgba(255,255,255,0.3);
-  border-top-color: #fff;
-  border-radius: 50%;
-  animation: ai-spin 0.6s linear infinite;
-}
-@keyframes ai-spin { to { transform: rotate(360deg); } }
 .ai-hint { margin: 6px 0 0; font-size: 11px; color: var(--text-color-quaternary); text-align: center; }
 
 

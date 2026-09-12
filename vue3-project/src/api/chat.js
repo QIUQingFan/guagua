@@ -104,6 +104,14 @@ export function inviteGroupMember(groupId, userId) {
 }
 
 /**
+ * 获取群邀请候选用户（最近聊天对象 + 关注对象）
+ * @param {number} groupId - 群ID
+ */
+export function getGroupInviteCandidates(groupId) {
+    return request.get(`/chat/groups/${groupId}/invite-candidates`)
+}
+
+/**
  * 移除群成员（仅群主/管理员可用）
  * @param {number} groupId - 群ID
  * @param {number} userId - 被移除用户ID
@@ -118,4 +126,22 @@ export function removeGroupMember(groupId, userId) {
  */
 export function dissolveChatGroup(groupId) {
     return request.post(`/chat/groups/${groupId}/dissolve`)
+}
+
+/**
+ * 更新群聊信息（仅群主可用）
+ * @param {number} groupId - 群ID
+ * @param {Object} data - { name?, description?, avatar? }
+ */
+export function updateChatGroupInfo(groupId, data) {
+    return request.put(`/chat/groups/${groupId}`, data)
+}
+
+/**
+ * 更新群公告（仅群主可用）
+ * @param {number} groupId - 群ID
+ * @param {string} announcement - 公告内容
+ */
+export function updateGroupAnnouncement(groupId, announcement) {
+    return request.put(`/chat/groups/${groupId}/announcement`, { announcement })
 }

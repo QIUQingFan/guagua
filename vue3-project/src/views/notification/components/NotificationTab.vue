@@ -105,12 +105,13 @@ defineExpose({
     left: calc(50% + 114px);
     transform: translateX(-50%);
     width: 100%;
+    max-width: 700px;
   }
 }
 
 @media (min-width: 961px) {
   .fixedTab {
-    max-width: 1000px;
+    max-width: 700px;
   }
 }
 

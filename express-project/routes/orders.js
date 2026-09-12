@@ -2,11 +2,20 @@ const express = require('express');
 const router = express.Router();
 const { pool } = require('../config/config');
 const { success, error, handleError, validateRequired } = require('../utils/responseHelper');
-const { HTTP_STATUS, RESPONSE_CODES, ORDER_STATUS, OPERATOR_TYPE, PRODUCT_STATUS, SHOP_RESPONSE_CODES } = require('../constants');
+const { HTTP_STATUS, RESPONSE_CODES, ORDER_STATUS, OPERATOR_TYPE, PRODUCT_STATUS, SHOP_RESPONSE_CODES, REFUND_STATUS } = require('../constants');
 const { authenticateToken } = require('../middleware/auth');
 const { generateOrderNo, isValidOrderNo } = require('../utils/orderNo');
 const { canTransition, getStatusText } = require('../utils/orderStatus');
 const { calcSubtotal, calcTotal, calcPayAmount } = require('../utils/amount');
+const alipay = require('../utils/alipay');
+const { refundOrder } = require('../utils/orderRefund');
+
+/** 允许退款的订单状态：待发货 / 待收货 / 已完成 */
+const REFUNDABLE_STATUSES = [
+    ORDER_STATUS.PENDING_SHIPMENT,
+    ORDER_STATUS.SHIPPED,
+    ORDER_STATUS.COMPLETED
+];
 
 
 router.use(authenticateToken);
@@ -51,7 +60,7 @@ router.post('/', async (req, res) => {
 
         await conn.beginTransaction();
 
-        
+
         const [addrRows] = await conn.execute(
             'SELECT id, receiver, phone, province, city, district, detail FROM addresses WHERE id = ? AND user_id = ?',
             [address_id, userId]
@@ -62,7 +71,7 @@ router.post('/', async (req, res) => {
         }
         const address = addrRows[0];
 
-        
+
         const subtotals = [];
         const orderItems = [];
         const stockOps = [];
@@ -75,7 +84,7 @@ router.post('/', async (req, res) => {
             }
             const qty = parseInt(quantity);
 
-            
+
             const [pRows] = await conn.execute(
                 `SELECT id, title, cover_image, price, stock, status, is_deleted
                  FROM products WHERE id = ? FOR UPDATE`,
@@ -130,13 +139,13 @@ router.post('/', async (req, res) => {
             stockOps.push({ product_id, sku_id, quantity: qty });
         }
 
-        
+
         const totalAmount = calcTotal(subtotals);
-        const shippingFee = '0.00'; 
+        const shippingFee = '0.00';
         const payAmount = calcPayAmount(totalAmount, shippingFee);
         const orderNo = generateOrderNo();
 
-        
+
         const fullAddress = `${address.province}${address.city}${address.district}${address.detail}`;
         const [orderResult] = await conn.execute(
             `INSERT INTO orders
@@ -148,7 +157,7 @@ router.post('/', async (req, res) => {
         );
         const orderId = orderResult.insertId;
 
-        
+
         for (const oi of orderItems) {
             await conn.execute(
                 `INSERT INTO order_items
@@ -158,7 +167,7 @@ router.post('/', async (req, res) => {
             );
         }
 
-        
+
         for (const op of stockOps) {
             if (op.sku_id) {
                 const [r] = await conn.execute(
@@ -180,14 +189,14 @@ router.post('/', async (req, res) => {
             }
         }
 
-        
+
         await conn.execute(
             `INSERT INTO order_status_logs (order_id, from_status, to_status, operator_id, operator_type, remark)
              VALUES (?, NULL, ?, ?, 'user', '下单')`,
             [orderId, ORDER_STATUS.PENDING_PAYMENT, userId]
         );
 
-        
+
         if (from_cart) {
             for (const op of stockOps) {
                 await conn.execute(
@@ -239,6 +248,7 @@ router.get('/', async (req, res) => {
 
         const [rows] = await pool.execute(
             `SELECT o.id, o.order_no, o.status, o.total_amount, o.pay_amount,
+                    o.trade_no, o.refund_status, o.refund_amount, o.refund_reason, o.refund_at,
                     o.created_at, o.completed_at
              FROM orders o
              ${whereClause}
@@ -247,7 +257,7 @@ router.get('/', async (req, res) => {
             [...params, String(limit), String(offset)]
         );
 
-        
+
         let list = [];
         if (rows.length > 0) {
             const orderIds = rows.map(r => r.id);
@@ -265,6 +275,7 @@ router.get('/', async (req, res) => {
             list = rows.map(r => ({
                 ...r,
                 status_text: getStatusText(r.status),
+                refund_status_text: require('../constants').REFUND_STATUS_TEXT[r.refund_status] || '',
                 total_quantity: (itemMap[r.id] || []).reduce((s, i) => s + Number(i.quantity), 0),
                 items: itemMap[r.id] || []
             }));
@@ -328,7 +339,7 @@ router.post('/:idOrNo/cancel', async (req, res) => {
         const userId = req.user.id;
         await conn.beginTransaction();
 
-        
+
         const isNumeric = /^\d+$/.test(String(req.params.idOrNo));
         const sql = isNumeric
             ? 'SELECT * FROM orders WHERE id = ? AND user_id = ? AND is_deleted = 0 FOR UPDATE'
@@ -340,18 +351,24 @@ router.post('/:idOrNo/cancel', async (req, res) => {
         }
         const order = rows[0];
 
+        // 仅待付款订单可取消；已付款订单请走退款流程，避免资金未退回
+        if (order.status !== ORDER_STATUS.PENDING_PAYMENT) {
+            await conn.rollback();
+            return error(res, `订单当前状态（${getStatusText(order.status)}）不允许取消`, SHOP_RESPONSE_CODES.INVALID_ORDER_STATUS, HTTP_STATUS.CONFLICT);
+        }
+
         if (!canTransition(order.status, ORDER_STATUS.CANCELLED)) {
             await conn.rollback();
             return error(res, `订单当前状态（${getStatusText(order.status)}）不允许取消`, SHOP_RESPONSE_CODES.INVALID_ORDER_STATUS, HTTP_STATUS.CONFLICT);
         }
 
-        
+
         await conn.execute(
             'UPDATE orders SET status = ?, cancelled_at = NOW() WHERE id = ?',
             [ORDER_STATUS.CANCELLED, order.id]
         );
 
-        
+
         const [items] = await conn.execute(
             'SELECT product_id, sku_id, quantity FROM order_items WHERE order_id = ?',
             [order.id]
@@ -369,7 +386,7 @@ router.post('/:idOrNo/cancel', async (req, res) => {
             );
         }
 
-        
+
         await conn.execute(
             `INSERT INTO order_status_logs (order_id, from_status, to_status, operator_id, operator_type, remark)
              VALUES (?, ?, ?, ?, 'user', '买家取消订单')`,
@@ -464,6 +481,212 @@ router.get('/:idOrNo/logs', async (req, res) => {
         success(res, data, '获取成功');
     } catch (err) {
         handleError(err, res, '获取订单日志');
+    }
+});
+
+/**
+ * @api {post} /api/orders/:idOrNo/pay 发起支付宝支付
+ * 仅待付款订单可发起，返回支付宝收银台跳转链接，前端打开该链接完成支付。
+ */
+router.post('/:idOrNo/pay', async (req, res) => {
+    const conn = await pool.getConnection();
+    try {
+        const userId = req.user.id;
+        await conn.beginTransaction();
+
+        const isNumeric = /^\d+$/.test(String(req.params.idOrNo));
+        const sql = isNumeric
+            ? 'SELECT * FROM orders WHERE id = ? AND user_id = ? AND is_deleted = 0 FOR UPDATE'
+            : 'SELECT * FROM orders WHERE order_no = ? AND user_id = ? AND is_deleted = 0 FOR UPDATE';
+        const [rows] = await conn.execute(sql, [req.params.idOrNo, userId]);
+        if (rows.length === 0) {
+            await conn.rollback();
+            return error(res, '订单不存在', RESPONSE_CODES.NOT_FOUND, HTTP_STATUS.NOT_FOUND);
+        }
+        const order = rows[0];
+
+        if (!canTransition(order.status, ORDER_STATUS.PENDING_SHIPMENT)) {
+            await conn.rollback();
+            return error(res, `订单当前状态（${getStatusText(order.status)}）不允许支付`, SHOP_RESPONSE_CODES.INVALID_ORDER_STATUS, HTTP_STATUS.CONFLICT);
+        }
+
+        if (!alipay.isEnabled()) {
+            await conn.rollback();
+            return error(res, '支付宝支付尚未配置，请联系管理员', SHOP_RESPONSE_CODES.ALIPAY_NOT_CONFIGURED, HTTP_STATUS.BAD_REQUEST);
+        }
+
+        const [itemRows] = await conn.execute(
+            'SELECT product_title, quantity FROM order_items WHERE order_id = ? LIMIT 1',
+            [order.id]
+        );
+        const first = itemRows[0];
+        const subject = first
+            ? `瓜呱商城-${first.product_title}${Number(first.quantity) > 1 ? ` x${first.quantity}` : ''}`
+            : `瓜呱商城订单${order.order_no}`;
+
+        const payUrl = alipay.buildPayUrl({
+            outTradeNo: order.order_no,
+            totalAmount: order.pay_amount,
+            subject
+        });
+
+        await conn.commit();
+        success(res, {
+            pay_url: payUrl,
+            order_no: order.order_no,
+            pay_amount: order.pay_amount
+        }, '支付链接生成成功，请在新窗口完成支付');
+    } catch (err) {
+        await conn.rollback();
+        handleError(err, res, '发起支付');
+    } finally {
+        conn.release();
+    }
+});
+
+/**
+ * @api {post} /api/orders/:idOrNo/refund 申请退款
+ * 仅待发货/待收货/已完成可退款，金额全额原路退回买家支付宝账户。
+ */
+router.post('/:idOrNo/refund', async (req, res) => {
+    const conn = await pool.getConnection();
+    try {
+        const userId = req.user.id;
+        const { reason } = req.body || {};
+        await conn.beginTransaction();
+
+        const isNumeric = /^\d+$/.test(String(req.params.idOrNo));
+        const sql = isNumeric
+            ? 'SELECT * FROM orders WHERE id = ? AND user_id = ? AND is_deleted = 0 FOR UPDATE'
+            : 'SELECT * FROM orders WHERE order_no = ? AND user_id = ? AND is_deleted = 0 FOR UPDATE';
+        const [rows] = await conn.execute(sql, [req.params.idOrNo, userId]);
+        if (rows.length === 0) {
+            await conn.rollback();
+            return error(res, '订单不存在', RESPONSE_CODES.NOT_FOUND, HTTP_STATUS.NOT_FOUND);
+        }
+        const order = rows[0];
+
+        if (!REFUNDABLE_STATUSES.includes(order.status)) {
+            await conn.rollback();
+            return error(res, `订单当前状态（${getStatusText(order.status)}）不允许退款`, SHOP_RESPONSE_CODES.INVALID_ORDER_STATUS, HTTP_STATUS.CONFLICT);
+        }
+        if (order.refund_status === REFUND_STATUS.REFUNDED) {
+            await conn.rollback();
+            return error(res, '该订单已退款，请勿重复操作', SHOP_RESPONSE_CODES.ALREADY_REFUNDED, HTTP_STATUS.CONFLICT);
+        }
+        if (!alipay.isEnabled()) {
+            await conn.rollback();
+            return error(res, '支付宝支付尚未配置，无法退款', SHOP_RESPONSE_CODES.ALIPAY_NOT_CONFIGURED, HTTP_STATUS.BAD_REQUEST);
+        }
+
+        const { already } = await refundOrder({
+            conn,
+            order,
+            operatorId: userId,
+            operatorType: OPERATOR_TYPE.USER,
+            reason: reason || '用户申请退款'
+        });
+
+        await conn.commit();
+        if (already) {
+            return success(res, { order_no: order.order_no }, '该订单已退款');
+        }
+        success(res, { order_no: order.order_no, refund_amount: order.pay_amount }, '退款成功，款项已原路退回您的支付宝账户');
+    } catch (err) {
+        await conn.rollback();
+        if (err.message && err.message.startsWith('支付宝退款失败')) {
+            return error(res, err.message, SHOP_RESPONSE_CODES.ALIPAY_REFUND_FAILED, HTTP_STATUS.BAD_REQUEST);
+        }
+        if (err.message && err.message.startsWith('调用支付宝退款失败')) {
+            return error(res, err.message, SHOP_RESPONSE_CODES.ALIPAY_REFUND_FAILED, HTTP_STATUS.BAD_REQUEST);
+        }
+        handleError(err, res, '申请退款');
+    } finally {
+        conn.release();
+    }
+});
+
+/**
+ * @api {get} /api/orders/:idOrNo/pay-status 查询支付结果
+ * 用户在收银台支付后，若异步通知延迟，前端可轮询此接口兜底；
+ * 若支付宝侧已支付而本地仍为待付款，会主动补单。
+ */
+router.get('/:idOrNo/pay-status', async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const order = await findOrder(req.params.idOrNo, userId);
+        if (!order) {
+            return error(res, '订单不存在', RESPONSE_CODES.NOT_FOUND, HTTP_STATUS.NOT_FOUND);
+        }
+
+        const paid = order.status !== ORDER_STATUS.PENDING_PAYMENT;
+        if (paid) {
+            return success(res, {
+                status: order.status,
+                status_text: getStatusText(order.status),
+                paid: true
+            }, '获取成功');
+        }
+
+        if (!alipay.isEnabled()) {
+            return success(res, {
+                status: order.status,
+                status_text: getStatusText(order.status),
+                paid: false
+            }, '获取成功');
+        }
+
+        // 主动向支付宝查询权威交易状态
+        let result;
+        try {
+            result = await alipay.queryTrade({ outTradeNo: order.order_no });
+        } catch (e) {
+            console.error('[orders:pay-status] 查询支付宝失败:', e.message);
+            return success(res, {
+                status: order.status,
+                status_text: getStatusText(order.status),
+                paid: false
+            }, '查询失败，请稍后重试');
+        }
+
+        const tradePaid = ['TRADE_SUCCESS', 'TRADE_FINISHED'].includes(result && result.trade_status);
+        if (tradePaid) {
+            const conn = await pool.getConnection();
+            try {
+                await conn.beginTransaction();
+                const [locked] = await conn.execute(
+                    'SELECT * FROM orders WHERE id = ? AND is_deleted = 0 FOR UPDATE',
+                    [order.id]
+                );
+                if (locked.length && locked[0].status === ORDER_STATUS.PENDING_PAYMENT) {
+                    await conn.execute(
+                        'UPDATE orders SET status = ?, trade_no = ?, paid_at = NOW() WHERE id = ?',
+                        [ORDER_STATUS.PENDING_SHIPMENT, result.trade_no || locked[0].trade_no, order.id]
+                    );
+                    await conn.execute(
+                        `INSERT INTO order_status_logs (order_id, from_status, to_status, operator_id, operator_type, remark)
+                         VALUES (?, ?, ?, NULL, 'system', '主动查询确认支付成功')`,
+                        [order.id, ORDER_STATUS.PENDING_PAYMENT, ORDER_STATUS.PENDING_SHIPMENT]
+                    );
+                }
+                await conn.commit();
+            } finally {
+                conn.release();
+            }
+            return success(res, {
+                status: ORDER_STATUS.PENDING_SHIPMENT,
+                status_text: getStatusText(ORDER_STATUS.PENDING_SHIPMENT),
+                paid: true
+            }, '支付成功');
+        }
+
+        return success(res, {
+            status: order.status,
+            status_text: getStatusText(order.status),
+            paid: false
+        }, '获取成功');
+    } catch (err) {
+        handleError(err, res, '查询支付状态');
     }
 });
 

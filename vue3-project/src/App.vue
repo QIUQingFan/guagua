@@ -113,7 +113,7 @@ onMounted(() => {
   background-color: var(--bg-color-primary);
   box-sizing: border-box;
   position: relative;
-  overflow-x: hidden;
+  overflow-x: clip;
   transition: background 0.2s ease;
 }
 

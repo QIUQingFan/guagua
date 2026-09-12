@@ -70,6 +70,7 @@ const ORDER_STATUS = {
   PENDING_SHIPMENT: 'pending_shipment',
   SHIPPED: 'shipped',
   COMPLETED: 'completed',
+  REFUNDED: 'refunded',
   CANCELLED: 'cancelled',
   CLOSED: 'closed'
 };
@@ -80,6 +81,7 @@ const ORDER_STATUS_TEXT = {
   pending_shipment: '待发货',
   shipped: '待收货',
   completed: '已完成',
+  refunded: '已退款',
   cancelled: '已取消',
   closed: '已关闭'
 };
@@ -87,9 +89,10 @@ const ORDER_STATUS_TEXT = {
 
 const ORDER_TRANSITIONS = {
   pending_payment: ['pending_shipment', 'cancelled'],
-  pending_shipment: ['shipped', 'cancelled', 'closed'],
-  shipped: ['completed', 'closed'],
-  completed: ['closed'],
+  pending_shipment: ['shipped', 'cancelled', 'closed', 'refunded'],
+  shipped: ['completed', 'closed', 'refunded'],
+  completed: ['closed', 'refunded'],
+  refunded: [],
   cancelled: [],
   closed: []
 };
@@ -107,7 +110,27 @@ const SHOP_RESPONSE_CODES = {
   PRODUCT_OFF_SHELF: 4092,     
   INVALID_ORDER_STATUS: 4093,  
   CART_ITEM_LIMIT: 4094,       
-  PRICE_MISMATCH: 4095         
+  PRICE_MISMATCH: 4095,        
+  ALIPAY_NOT_CONFIGURED: 4096, 
+  ALIPAY_PAY_FAILED: 4097,     
+  ALIPAY_REFUND_FAILED: 4098,  
+  ALREADY_REFUNDED: 4099       
+};
+
+
+const REFUND_STATUS = {
+  NONE: 'none',
+  APPLYING: 'applying',
+  REFUNDED: 'refunded',
+  FAILED: 'failed'
+};
+
+
+const REFUND_STATUS_TEXT = {
+  none: '未退款',
+  applying: '退款中',
+  refunded: '已退款',
+  failed: '退款失败'
 };
 
 
@@ -124,5 +147,7 @@ module.exports = {
   ORDER_TRANSITIONS,
   OPERATOR_TYPE,
   SHOP_RESPONSE_CODES,
+  REFUND_STATUS,
+  REFUND_STATUS_TEXT,
   CART_MAX_QUANTITY
 };

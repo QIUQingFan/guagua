@@ -101,7 +101,7 @@ const setupSocketServer = (server) => {
         });
 
         socket.on('private:recall', (data, callback) => {
-            recallHandler.recallPrivateMessage(socket, data, callback);
+            recallHandler.recallPrivateMessage(io, socket, data, callback);
         });
 
         socket.on('group:create', (data, callback) => {
@@ -125,7 +125,7 @@ const setupSocketServer = (server) => {
         });
 
         socket.on('group:recall', (data, callback) => {
-            recallHandler.recallGroupMessage(socket, data, callback);
+            recallHandler.recallGroupMessage(io, socket, data, callback);
         });
 
         socket.on('comment:post', (data, callback) => {

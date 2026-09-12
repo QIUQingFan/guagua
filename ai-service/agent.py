@@ -26,6 +26,7 @@ from tools import (
     get_hot_products,
     extract_procurement_intent,
 )
+from agents.user_profile import UserProfile, analyze_user_profile, get_cached_profile
 
 logger = logging.getLogger("agent")
 
@@ -173,6 +174,7 @@ class AgentState(TypedDict):
     token_usage: Optional[dict]
     retrieval_query: Optional[str]
     intent_result: Optional[dict]
+    user_profile: Optional[dict]
 
 
 CATEGORY_HINT_MAP = {
@@ -352,52 +354,134 @@ def _extract_token_usage(messages: List) -> Optional[dict]:
     return {"token_input": total_in, "token_output": total_out}
 
 
+def _parse_products(products_text: str) -> List[dict]:
+    """解析 search_products 的文本结果，返回 [{id, name, price, stock}, ...]（按行顺序）。"""
+    items: List[dict] = []
+    for line in products_text.splitlines():
+        m = re.search(r"#(\d+)\s+(.+?)\|\s*category:", line)
+        if not m:
+            continue
+        price_m = re.search(r"price:\s*CNY\s*([\d.]+)", line)
+        stock_m = re.search(r"stock:\s*(\d+)", line)
+        items.append({
+            "id": int(m.group(1)),
+            "name": m.group(2).strip(),
+            "price": float(price_m.group(1)) if price_m else 0.0,
+            "stock": int(stock_m.group(1)) if stock_m else 0,
+        })
+    return items
+
+
 def _build_procurement_action(intent: dict, products_text: str) -> Optional[dict]:
     if intent.get("action_type") not in {"add_to_cart", "buy_now"}:
         return None
-    product_match = re.search(r"#(\d+)\s+(.+?)\|", products_text)
-    if not product_match:
+    items = _parse_products(products_text)
+    if not items:
         return None
-    product_id = int(product_match.group(1))
-    product_name = product_match.group(2).strip()
-    price_match = re.search(r"price:\s*CNY\s*([\d.]+)", products_text)
-    price = float(price_match.group(1)) if price_match else 0.0
-    stock_match = re.search(r"stock:\s*(\d+)", products_text)
-    stock = int(stock_match.group(1)) if stock_match else 0
+    query = (intent.get("product_query") or "").strip().lower()
+    pick = items[0]
+    if query:
+        # 优先选择标题与用户指定商品精确一致的条目，避免「立即购买」按钮指向与推荐不符的商品
+        for it in items:
+            if it["name"].strip().lower() == query:
+                pick = it
+                break
+        else:
+            contains = [it for it in items if query in it["name"].lower()]
+            if contains:
+                pick = contains[0]
     return {
         "type": intent["action_type"],
-        "productId": product_id,
-        "productName": product_name,
+        "productId": pick["id"],
+        "productName": pick["name"],
         "quantity": max(1, int(intent.get("quantity") or 1)),
-        "price": price,
-        "stock": stock,
+        "price": pick["price"],
+        "stock": pick["stock"],
     }
+
+
+def _last_product_from_history(history: List[dict]) -> Optional[str]:
+    """
+    从最近对话历史中提取最后被推荐/提到的商品名。
+
+    用于用户表达购买/下单意愿但未指明具体商品时（如「下单」「就这个」），
+    自动定位上一轮 AI 推荐的商品，以便搜索并构建购买按钮。
+    """
+    for item in reversed(history[-8:]):
+        if item.get("role") != "assistant":
+            continue
+        content = (item.get("content") or "").strip()
+        if not content:
+            continue
+        m = re.search(r"#(\d+)\s+([^\n|]+?)(?:\s*\||\n|$)", content)
+        if not m:
+            continue
+        name = m.group(2).strip()
+        name = re.sub(r"[\s*#、，。；：:]+$", "", name).strip()
+        if len(name) > 1:
+            return name
+    return None
+
+
+def _resolve_purchase_intent(user_input: str, history: List[dict], intent: dict) -> dict:
+    """
+    完善购买意图：当用户表达购买/下单意愿但当前消息未指明具体商品时，
+    从对话历史中最近推荐的商品补充 product_query，确保能定位商品并下发购买按钮。
+    """
+    intent = dict(intent)
+    if intent.get("action_type") in {"add_to_cart", "buy_now"}:
+        intent["needs_product_help"] = True
+        has_filter = bool(
+            (intent.get("product_query") or "").strip()
+            or (intent.get("category_hint") or "").strip()
+            or intent.get("budget_min") is not None
+            or intent.get("budget_max") is not None
+        )
+        if not has_filter:
+            fallback = _last_product_from_history(history)
+            if fallback:
+                intent["product_query"] = fallback
+    return intent
 
 
 def _purchase_action_guidance(action: Optional[dict], wants_purchase: bool) -> str:
     """
     生成「下单能力」指引，拼接到流式对话 system_content 末尾。
-    - action 已构建：明确告知某商品已准备好对应操作按钮。
-    - wants_purchase 但 action 未构建（未定位到商品）：请用户补充商品名，不要一律推给商城页。
+
+    - action 已构建：明确告知已为某商品准备好「立即购买/加入购物车」按钮，
+      并要求 LLM 在回复中如实告知（前端会真实渲染该按钮）。
+    - action 未构建：无论用户是否表达购买意愿，都明确声明【没有】下发按钮，
+      禁止 LLM 声称「已为您生成按钮/点击下方按钮即可下单」，杜绝按钮幻觉。
     """
     if action:
         is_buy_now = action.get("type") == "buy_now"
-        action_desc = "立即购买（点击后跳转结算页直接下单）" if is_buy_now else "加入购物车"
+        action_desc = "立即购买" if is_buy_now else "加入购物车"
         return (
             "\n\n[下单能力]你是瓜呱商城 AI 助手，具备直接下单能力。系统已为商品 "
             f"#{action['productId']} {action['productName']} 准备好「{action_desc}」操作，"
             f"前端会在本条回复下方显示对应按钮供用户一键完成。请在回复中明确告知用户："
             f"已为其准备好该商品，点击下方「{action_desc}」按钮即可完成"
             f"{'下单' if is_buy_now else '加购'}（价格 ¥{action['price']:.2f}、库存 {action['stock']} 件）。"
-            "切勿让用户「前往商城页面搜索下单」或声称无法处理订单——你具备此能力。"
+            "【一致性要求】本条回复【只能推荐并介绍这一款商品】（即按钮对应的商品，含价格与特点），"
+            "不得再推荐或罗列热销榜、匹配列表中的其它商品，也不得让用户前往商城页面自行搜索下单，"
+            "避免用户看到的推荐商品与「立即购买」按钮指向的商品不一致。"
+            "切勿声称无法处理订单——你具备此能力。"
         )
     if wants_purchase:
         return (
             "\n\n[下单能力]你是瓜呱商城 AI 助手，具备直接下单能力：当用户表达购买/下单意愿且能定位到可售商品时，"
-            "系统会自动下发「立即购买/加入购物车」按钮。若本次未能定位到具体商品，请如实告知并请用户补充商品名，"
-            "不要一律让用户「前往商城页面」或声称无法下单。"
+            "系统会自动下发「立即购买/加入购物车」按钮。"
+            "【重要】本条回复系统【没有】下发任何按钮：若你声称「已为您生成按钮/点击下方按钮即可下单」，"
+            "前端将无按钮可点、用户将无法完成下单。请先向用户确认要下单的具体商品（可结合最近推荐过或用户提到过的商品），"
+            "例如回复「好的，请问您想下单哪一款呢？」。不要一律让用户「前往商城页面」，也不要声称无法下单。"
         )
-    return ""
+    return (
+        "\n\n[下单能力]你是瓜呱商城 AI 助手，具备直接下单能力：当用户明确表达购买/下单意愿时，"
+        "系统会自动下发「立即购买/加入购物车」按钮。"
+        "【重要】本条回复系统【没有】下发任何按钮：请勿提及「点击下方按钮」「已为您生成按钮」等说法，"
+        "否则用户将找不到按钮、无法完成下单。若用户表示想购买推荐的商品，请直接告知其回复想购买的商品即可，"
+        "系统会自动生成下单按钮；不要声称存在按钮，也不要引导用户前往商城页面自行下单。"
+    )
 
 
 RECOMMEND_SYSTEM_PROMPT = load_prompt("agent-recommend")
@@ -538,10 +622,14 @@ def customer_service_node(state: AgentState) -> AgentState:
 
         intent = {}
         try:
-            intent_text = extract_procurement_intent.invoke({"user_input": state["user_input"]})
+            intent_text = extract_procurement_intent.invoke({
+                "user_input": state["user_input"],
+                "history": _history_as_text(state["history"]),
+            })
             intent = json.loads(intent_text)
         except Exception:
             pass
+        intent = _resolve_purchase_intent(state["user_input"], state["history"], intent)
 
         action = None
         if intent.get("needs_product_help") and intent.get("action_type") in {"add_to_cart", "buy_now"}:
@@ -600,10 +688,14 @@ def recommend_node(state: AgentState) -> AgentState:
 
         intent = {}
         try:
-            intent_text = extract_procurement_intent.invoke({"user_input": state["user_input"]})
+            intent_text = extract_procurement_intent.invoke({
+                "user_input": state["user_input"],
+                "history": _history_as_text(state["history"]),
+            })
             intent = json.loads(intent_text)
         except Exception:
             pass
+        intent = _resolve_purchase_intent(state["user_input"], state["history"], intent)
 
         action = None
         if intent.get("needs_product_help") and intent.get("action_type") in {"add_to_cart", "buy_now"}:
@@ -674,6 +766,33 @@ def _invoke_llm(messages: List, fallback: str) -> str:
         return fallback
 
 
+@trace_node("user_profile", "agent")
+def user_profile_node(state: AgentState) -> AgentState:
+    """在推荐/客服前执行用户画像分析"""
+    import asyncio
+
+    user_id = state.get("user_id")
+    if not user_id:
+        return {**state, "user_profile": None}
+
+    try:
+        profile = get_cached_profile(str(user_id))
+        if profile is None:
+            profile = analyze_user_profile(str(user_id), {"history": state.get("history", [])})
+        return {**state, "user_profile": profile.model_dump() if profile else None}
+    except Exception as exc:
+        logger.warning("用户画像分析失败，跳过: %s", exc)
+        return {**state, "user_profile": None}
+
+
+def user_profile_decision(state: AgentState) -> str:
+    """画像分析完成后，根据原始路由决定下一步"""
+    route = state.get("route", "customer_service")
+    if route == "recommend":
+        return "recommend"
+    return "rewrite"
+
+
 def supervisor_decision(state: AgentState) -> str:
     if state["task_status"] == TaskStatus.COMPLETED:
         return END
@@ -683,6 +802,7 @@ def supervisor_decision(state: AgentState) -> str:
 def build_graph():
     graph = StateGraph(AgentState)
     graph.add_node("supervisor", supervisor_node)
+    graph.add_node("user_profile", user_profile_node)
     graph.add_node("rewrite", rewrite_node)
     graph.add_node("rag_retrieve", rag_retrieve_node)
     graph.add_node("customer_service", customer_service_node)
@@ -692,10 +812,14 @@ def build_graph():
 
     graph.set_entry_point("supervisor")
     graph.add_conditional_edges("supervisor", supervisor_decision, {
-        "customer_service": "rewrite",
-        "recommend": "recommend",
+        "customer_service": "user_profile",
+        "recommend": "user_profile",
         "analysis": "analysis",
         END: END,
+    })
+    graph.add_conditional_edges("user_profile", user_profile_decision, {
+        "rewrite": "rewrite",
+        "recommend": "recommend",
     })
     graph.add_edge("rewrite", "rag_retrieve")
     graph.add_edge("rag_retrieve", "customer_service")
@@ -731,6 +855,7 @@ def run_agent_with_meta(user_input: str, history: List[dict], user_id: Optional[
         "snapshot": None,
         "token_usage": None,
         "retrieval_query": None,
+        "user_profile": None,
     }
     with trace_run(user_id, user_input) as trace_run_id:
         result = agent_graph.invoke(initial_state)
@@ -884,10 +1009,14 @@ def stream_agent(user_input: str, history: List[dict], user_id: Optional[int] = 
         elif route == "recommend":
             intent = {}
             try:
-                intent_text = extract_procurement_intent.invoke({"user_input": user_input})
+                intent_text = extract_procurement_intent.invoke({
+                    "user_input": user_input,
+                    "history": _history_as_text(history),
+                })
                 intent = json.loads(intent_text)
             except Exception:
                 pass
+            intent = _resolve_purchase_intent(user_input, history, intent)
 
             hot_text = get_hot_products.invoke({"limit": 5})
             product_query = (intent.get("product_query") or "").strip()
@@ -921,10 +1050,14 @@ def stream_agent(user_input: str, history: List[dict], user_id: Optional[int] = 
         else:
             intent = {}
             try:
-                intent_text = extract_procurement_intent.invoke({"user_input": user_input})
+                intent_text = extract_procurement_intent.invoke({
+                    "user_input": user_input,
+                    "history": _history_as_text(history),
+                })
                 intent = json.loads(intent_text)
             except Exception:
                 pass
+            intent = _resolve_purchase_intent(user_input, history, intent)
 
             cs_product_query = (intent.get("product_query") or "").strip()
             cs_has_filter = bool(

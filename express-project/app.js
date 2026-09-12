@@ -1,4 +1,4 @@
-﻿const express = require('express');
+const express = require('express');
 const http = require('http');
 const path = require('path');
 const cors = require('cors');
@@ -30,6 +30,7 @@ const productFavoritesRoutes = require('./routes/productFavorites');
 const cartRoutes = require('./routes/cart');
 const addressesRoutes = require('./routes/addresses');
 const ordersRoutes = require('./routes/orders');
+const alipayRoutes = require('./routes/alipay');
 
 const aiProxyRoutes = require('./routes/aiProxy');
 const aiConversationRoutes = require('./routes/aiConversation');
@@ -51,7 +52,7 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-app.options('*', cors(corsOptions));  
+app.options('*', cors(corsOptions));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
@@ -89,8 +90,7 @@ app.use('/api/product-favorites', productFavoritesRoutes);
 app.use('/api/cart', cartRoutes);
 app.use('/api/addresses', addressesRoutes);
 app.use('/api/orders', ordersRoutes);
-
-
+app.use('/api/alipay', alipayRoutes);
 
 app.use('/api/ai', aiProxyRoutes);
 app.use('/api/ai/conversations', aiConversationRoutes);
@@ -103,7 +103,6 @@ app.use((err, req, res, next) => {
   res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({ code: RESPONSE_CODES.ERROR, message: '服务器内部错误' });
 });
 
-
 app.use('*', (req, res) => {
   res.status(HTTP_STATUS.NOT_FOUND).json({ code: RESPONSE_CODES.NOT_FOUND, message: '接口不存在' });
 });
@@ -111,7 +110,6 @@ app.use('*', (req, res) => {
 
 const PORT = config.server.port;
 const server = http.createServer(app);
-
 
 const io = setupSocketServer(server);
 app.set('io', io);
