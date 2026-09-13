@@ -17,6 +17,34 @@ RANGE_DAYS = {"today": 1, "7d": 7, "30d": 30}
 
 ALLOWED_ACTIONS = {"view", "cart", "purchase", "recommend_click", "ai_recommend"}
 
+_ACTION_ZSET_KEY = {
+    "view": "views",
+    "cart": "carts",
+    "recommend_click": "clicks",
+    "purchase": "purchases",
+}
+_REALTIME_WINDOW_MS = 7 * 24 * 3600 * 1000
+
+
+def _record_realtime_behavior(user_id: Optional[int], session_key: Optional[str], product_id: Optional[int], action: str) -> None:
+    """写 Redis ZSet 实时特征"""
+    suffix = _ACTION_ZSET_KEY.get(action)
+    if suffix is None:
+        return
+    try:
+        import time
+
+        from redis_client import get_sync_client
+
+        r = get_sync_client()
+        ident = f"u{user_id}" if user_id else f"s{session_key}"
+        key = f"user:{ident}:{suffix}"
+        now_ms = int(time.time() * 1000)
+        r.zadd(key, {str(product_id): now_ms})
+        r.zremrangebyscore(key, 0, now_ms - _REALTIME_WINDOW_MS)
+    except Exception:
+        pass
+
 
 def _to_int(value: Any) -> int:
     if value is None:
@@ -94,7 +122,9 @@ def report_behavior(
                 "ctx": json.dumps(context, ensure_ascii=False) if context else None,
             },
         )
-        return int(result.lastrowid)
+        row_id = int(result.lastrowid)
+    _record_realtime_behavior(user_id, session_key, product_id, action)
+    return row_id
 
 
 def _query_funnel(conn, start_dt: datetime, end_dt: datetime) -> Dict[str, Any]:

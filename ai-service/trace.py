@@ -40,6 +40,8 @@ def _ensure_tables() -> None:
         route VARCHAR(32) NULL,
         status VARCHAR(16) NOT NULL DEFAULT 'running',
         latency_ms INT NULL,
+        token_input INT NULL,
+        token_output INT NULL,
         error TEXT NULL,
         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         finished_at DATETIME NULL,
@@ -72,6 +74,15 @@ def _ensure_tables() -> None:
         logger.info("Trace 表已就绪（rag_trace_run / rag_trace_node）")
     except Exception as exc:
         logger.warning("Trace 建表失败（Trace 功能将降级为无记录）：%s", exc)
+
+    # token 列
+    for col, ctype in (("token_input", "INT NULL"), ("token_output", "INT NULL")):
+        try:
+            with _get_engine().begin() as conn:
+                conn.execute(text(f"ALTER TABLE rag_trace_run ADD COLUMN {col} {ctype}"))
+            logger.info("Trace 补齐列：%s", col)
+        except Exception:
+            pass
 
 
 def _summarize_state(state: Any) -> str:
@@ -154,6 +165,17 @@ def update_run_route(run_id: str, route: str) -> None:
             )
     except Exception as exc:
         logger.warning("Trace update_run_route 写入失败: %s", exc)
+
+
+def update_run_token(run_id: str, token_input: Optional[int], token_output: Optional[int]) -> None:
+    try:
+        with _get_engine().begin() as conn:
+            conn.execute(
+                text("UPDATE rag_trace_run SET token_input=:ti, token_output=:to WHERE run_id=:run_id"),
+                {"ti": token_input, "to": token_output, "run_id": run_id},
+            )
+    except Exception as exc:
+        logger.warning("Trace update_run_token 写入失败: %s", exc)
 
 
 def update_current_run_route(route: str) -> None:
@@ -311,7 +333,7 @@ def get_run_with_nodes(run_id: str) -> Optional[dict]:
     with _get_engine().connect() as conn:
         run_row = conn.execute(
             text(
-                "SELECT run_id, user_id, question, route, status, latency_ms, error, created_at, finished_at "
+                "SELECT run_id, user_id, question, route, status, latency_ms, token_input, token_output, error, created_at, finished_at "
                 "FROM rag_trace_run WHERE run_id = :run_id"
             ),
             {"run_id": run_id},

@@ -63,6 +63,9 @@ class Settings(BaseSettings):
 
     INTENT_CONFIDENCE_THRESHOLD: float = 0.7
 
+    AB_TEST_ENABLED: str = "true"
+    AB_TEST_BUCKETS: int = 100
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

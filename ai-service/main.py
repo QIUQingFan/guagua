@@ -1095,6 +1095,35 @@ async def extract_mcp_tool_params(request: Request, body: dict):
     return {"tool_id": tool_id, "user_input": user_input, "params": params}
 
 
+class ABOutcome(BaseModel):
+    exp_id: str
+    group: str
+    success: bool
+
+
+@app.get("/ai/admin/ab/experiments")
+async def ab_experiments(request: Request):
+    """查看所有 A-B 实验与分组状态。"""
+    _, user_role = _extract_user(request)
+    if user_role != "admin":
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+    from services.ab_test import get_default_engine
+    return {"experiments": get_default_engine().get_stats()}
+
+
+@app.post("/ai/admin/ab/outcome")
+async def ab_outcome(req: ABOutcome, request: Request):
+    """记录实验结果，更新 Thompson Sampling 分布参数。"""
+    _, user_role = _extract_user(request)
+    if user_role != "admin":
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+    from services.ab_test import get_default_engine
+    ok = get_default_engine().record_outcome(req.exp_id, req.group, req.success)
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"实验 {req.exp_id} 或分组不存在")
+    return {"status": "ok"}
+
+
 if __name__ == "__main__":
     import uvicorn
 

@@ -6,6 +6,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
+import redis as sync_redis
 import redis.asyncio as aioredis
 
 from config import settings
@@ -27,6 +28,7 @@ class RedisClient:
                 password=settings.REDIS_PASSWORD or None,
                 decode_responses=True,
                 max_connections=settings.REDIS_MAX_CONNECTIONS,
+                protocol=2,
             )
             self._client = aioredis.Redis(connection_pool=self._pool)
             logger.info(
@@ -73,6 +75,15 @@ class RedisClient:
     async def zrank(self, name: str, value: str) -> Optional[int]:
         return await self._ensure().zrank(name, value)
 
+    async def zrangebyscore(self, name: str, min_score, max_score, withscores: bool = False) -> list:
+        return await self._ensure().zrangebyscore(name, min_score, max_score, withscores=withscores)
+
+    async def zcount(self, name: str, min_score, max_score) -> int:
+        return await self._ensure().zcount(name, min_score, max_score)
+
+    async def zremrangebyscore(self, name: str, min_score, max_score) -> int:
+        return await self._ensure().zremrangebyscore(name, min_score, max_score)
+
     async def incr(self, name: str) -> int:
         return await self._ensure().incr(name)
 
@@ -92,3 +103,25 @@ class RedisClient:
 
 
 redis_client = RedisClient()
+
+_sync_client: Optional[sync_redis.Redis] = None
+
+
+def get_sync_client() -> sync_redis.Redis:
+    """同步 Redis 客户端
+
+    与异步连接池分离，避免 asyncio.run + 共享异步池在多线程下的事件循环绑定冲突。
+    """
+    global _sync_client
+    if _sync_client is None:
+        _sync_client = sync_redis.Redis(
+            host=settings.REDIS_HOST,
+            port=settings.REDIS_PORT,
+            db=settings.REDIS_DB,
+            password=settings.REDIS_PASSWORD or None,
+            decode_responses=True,
+            protocol=2,
+            socket_connect_timeout=2,
+            socket_timeout=2,
+        )
+    return _sync_client

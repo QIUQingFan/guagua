@@ -29,6 +29,7 @@ from database import engine
 from model_router import get_default_router
 from prompts import load_prompt
 from redis_client import redis_client
+from services.rfm import levels as rfm_levels_fn, segment as rfm_segment_fn
 
 logger = logging.getLogger("agents.user_profile")
 
@@ -55,6 +56,8 @@ class UserProfile(BaseModel):
     rfm_score: Dict[str, float] = Field(
         default_factory=lambda: {"recency": 0.0, "frequency": 0.0, "monetary": 0.0}
     )
+    rfm_levels: Dict[str, int] = Field(default_factory=dict)
+    rfm_segment: str = ""
     real_time_tags: Dict[str, str] = Field(default_factory=dict)
 
 
@@ -170,10 +173,46 @@ def _fetch_behavior_data(user_id: str) -> Dict[str, Any]:
                 data["recent_views"] = [dict(r._mapping) for r in rows]
             except Exception as exc:
                 logger.debug("用户画像浏览行为拉取失败（降级）: %s", exc)
+
+        # 实时特征（Redis ZSet）：融合最近浏览 + 多窗口行为计数
+        try:
+            realtime_views, realtime_counts = _fetch_realtime_features(user_id)
+            if realtime_views:
+                seen = {v.get("product_id") for v in data["recent_views"]}
+                data["recent_views"] = [v for v in realtime_views if v.get("product_id") not in seen] + data["recent_views"]
+            data["realtime_counts"] = realtime_counts
+        except Exception:
+            pass
     except Exception as exc:
         logger.warning("用户画像行为数据拉取整体失败，降级为空: %s", exc)
 
     return data
+
+
+def _fetch_realtime_features(user_id: str) -> tuple:
+    """从 Redis ZSet 读取实时特征（最近 7 天浏览 + 1h/24h/7d 行为计数），失败返回空。"""
+    try:
+        import time
+
+        from redis_client import get_sync_client
+
+        if not str(user_id).isdigit():
+            return [], {}
+        r = get_sync_client()
+        ident = f"u{user_id}"
+        now = int(time.time() * 1000)
+        w1h, w24h, w7d = 3600 * 1000, 24 * 3600 * 1000, 7 * 24 * 3600 * 1000
+        counts = {}
+        for name in ("views", "clicks", "carts", "purchases"):
+            zkey = f"user:{ident}:{name}"
+            counts[f"{name}_1h"] = r.zcount(zkey, now - w1h, now)
+            counts[f"{name}_24h"] = r.zcount(zkey, now - w24h, now)
+            counts[f"{name}_7d"] = r.zcount(zkey, now - w7d, now)
+        raw = r.zrevrangebyscore(f"user:{ident}:views", now, now - w7d, withscores=True)
+        views = [{"product_id": int(pid), "last_viewed_at": int(score)} for pid, score in raw]
+        return views, counts
+    except Exception:
+        return [], {}
 
 
 # --------------------------------------------------------------------------- #
@@ -338,6 +377,18 @@ def analyze_user_profile(user_id: str, hints: Optional[Dict[str, Any]] = None) -
             if isinstance(v, (int, float)):
                 rfm[k] = max(0.0, min(1.0, float(v)))
 
+    # RFM 分位分箱 + 分群推导（分箱为准）
+    rfm_lv = rfm_levels_fn(rfm)
+    has_purchase = bool(
+        (behavior.get("purchase_stats") or {}).get("purchase_count_30d")
+        or behavior.get("recent_purchases")
+    )
+    rfm_seg = rfm_segment_fn(rfm, has_purchase)
+
+    # 无 LLM 标签时用实时行为计数兜底
+    if not real_time_tags and behavior.get("realtime_counts"):
+        real_time_tags = {str(k): str(v) for k, v in behavior.get("realtime_counts", {}).items()}
+
     # recent_views / recent_purchases 直接取自行为数据（不依赖 LLM，保留结构化）
     recent_views = behavior.get("recent_views") or []
     recent_purchases = behavior.get("recent_purchases") or []
@@ -350,6 +401,8 @@ def analyze_user_profile(user_id: str, hints: Optional[Dict[str, Any]] = None) -
         recent_views=recent_views,
         recent_purchases=recent_purchases,
         rfm_score=rfm,
+        rfm_levels=rfm_lv,
+        rfm_segment=rfm_seg,
         real_time_tags=real_time_tags,
     )
 

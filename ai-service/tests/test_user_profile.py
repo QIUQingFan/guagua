@@ -103,10 +103,11 @@ class TestParseLLMJson:
 @patch("agents.user_profile.load_prompt")
 @patch("agents.user_profile.engine")
 @patch("agents.user_profile.redis_client")
+@patch("agents.user_profile._fetch_realtime_features", return_value=([], {}))
 class TestAnalyzeUserProfile:
     """用户画像分析主流程测试"""
 
-    def test_llm_returns_valid_json(self, mock_redis, mock_engine, mock_prompt, mock_router):
+    def test_llm_returns_valid_json(self, mock_fetch, mock_redis, mock_engine, mock_prompt, mock_router):
         mock_conn = MagicMock()
         mock_engine.connect.return_value.__enter__.return_value = mock_conn
         mock_conn.execute.return_value.fetchall.return_value = []
@@ -130,7 +131,7 @@ class TestAnalyzeUserProfile:
         assert profile.price_range == (50.0, 300.0)
         assert profile.rfm_score == {"recency": 0.8, "frequency": 0.3, "monetary": 0.3}
 
-    def test_llm_returns_invalid_json(self, mock_redis, mock_engine, mock_prompt, mock_router):
+    def test_llm_returns_invalid_json(self, mock_fetch, mock_redis, mock_engine, mock_prompt, mock_router):
         mock_conn = MagicMock()
         mock_engine.connect.return_value.__enter__.return_value = mock_conn
         mock_conn.execute.return_value.fetchall.return_value = []
@@ -152,7 +153,7 @@ class TestAnalyzeUserProfile:
         assert profile.preferred_categories == []
         assert profile.price_range == (0.0, 10000.0)
 
-    def test_llm_raises_exception(self, mock_redis, mock_engine, mock_prompt, mock_router):
+    def test_llm_raises_exception(self, mock_fetch, mock_redis, mock_engine, mock_prompt, mock_router):
         mock_conn = MagicMock()
         mock_engine.connect.return_value.__enter__.return_value = mock_conn
         mock_conn.execute.return_value.fetchall.return_value = []
@@ -173,7 +174,7 @@ class TestAnalyzeUserProfile:
         assert profile.segments == ["active"]
         assert profile.user_id == "test_user_3"
 
-    def test_db_query_failure(self, mock_redis, mock_engine, mock_prompt, mock_router):
+    def test_db_query_failure(self, mock_fetch, mock_redis, mock_engine, mock_prompt, mock_router):
         mock_engine.connect.side_effect = Exception("数据库连接失败")
 
         mock_prompt.return_value = "分析用户画像"
@@ -193,7 +194,7 @@ class TestAnalyzeUserProfile:
         assert profile.recent_views == []
         assert profile.recent_purchases == []
 
-    def test_redis_cache_write_failure(self, mock_redis, mock_engine, mock_prompt, mock_router):
+    def test_redis_cache_write_failure(self, mock_fetch, mock_redis, mock_engine, mock_prompt, mock_router):
         mock_conn = MagicMock()
         mock_engine.connect.return_value.__enter__.return_value = mock_conn
         mock_conn.execute.return_value.fetchall.return_value = []
@@ -260,10 +261,11 @@ class TestGetCachedProfile:
 @patch("agents.user_profile.load_prompt")
 @patch("agents.user_profile.engine")
 @patch("agents.user_profile.redis_client")
+@patch("agents.user_profile._fetch_realtime_features", return_value=([], {}))
 class TestUserProfileNode:
     """user_profile_node 集成测试（通过直接调用 analyze_user_profile）"""
 
-    def test_profile_contains_all_required_fields(self, mock_redis, mock_engine, mock_prompt, mock_router):
+    def test_profile_contains_all_required_fields(self, mock_fetch, mock_redis, mock_engine, mock_prompt, mock_router):
         mock_conn = MagicMock()
         mock_engine.connect.return_value.__enter__.return_value = mock_conn
         mock_conn.execute.return_value.fetchall.return_value = []
@@ -294,7 +296,7 @@ class TestUserProfileNode:
         assert "rfm_score" in profile_dict
         assert "real_time_tags" in profile_dict
 
-    def test_segments_default_to_active(self, mock_redis, mock_engine, mock_prompt, mock_router):
+    def test_segments_default_to_active(self, mock_fetch, mock_redis, mock_engine, mock_prompt, mock_router):
         mock_conn = MagicMock()
         mock_engine.connect.return_value.__enter__.return_value = mock_conn
         mock_conn.execute.return_value.fetchall.return_value = []
@@ -310,7 +312,7 @@ class TestUserProfileNode:
         profile = analyze_user_profile("test_user")
         assert profile.segments == ["active"]
 
-    def test_price_range_default(self, mock_redis, mock_engine, mock_prompt, mock_router):
+    def test_price_range_default(self, mock_fetch, mock_redis, mock_engine, mock_prompt, mock_router):
         mock_conn = MagicMock()
         mock_engine.connect.return_value.__enter__.return_value = mock_conn
         mock_conn.execute.return_value.fetchall.return_value = []

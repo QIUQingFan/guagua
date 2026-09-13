@@ -400,6 +400,26 @@ def _build_procurement_action(intent: dict, products_text: str) -> Optional[dict
     }
 
 
+def _enrich_action(action: Optional[dict], products_text: str, profile: Optional[dict], user_id: Optional[int]) -> Optional[dict]:
+    """为购买按钮 action 附加库存限购/预警与营销文案"""
+    if not action:
+        return action
+    try:
+        products = _parse_products(products_text)
+        if not products:
+            return action
+        from services.inventory import decide
+        inv = decide(products)
+        action["inventory"] = {"limits": inv["limits"], "alerts": inv["alerts"]}
+        from services.ab_test import get_default_engine
+        from services.marketing_copy import generate
+        exp = get_default_engine().assign("copy-style", user_id)
+        action["copies"] = generate(profile, products, personalized=(exp["group"] == "personalized"))
+    except Exception:
+        pass
+    return action
+
+
 def _last_product_from_history(history: List[dict]) -> Optional[str]:
     """
     从最近对话历史中提取最后被推荐/提到的商品名。
@@ -641,6 +661,7 @@ def customer_service_node(state: AgentState) -> AgentState:
                 "budget_max": intent.get("budget_max"),
             })
             action = _build_procurement_action(intent, products_text)
+            action = _enrich_action(action, products_text, state.get("user_profile"), state.get("user_id"))
 
         agent_result = _format_agent_result("customer_service", response, action)
         token_usage = _extract_token_usage(result.get("messages", []))
@@ -707,6 +728,7 @@ def recommend_node(state: AgentState) -> AgentState:
                 "budget_max": intent.get("budget_max"),
             })
             action = _build_procurement_action(intent, products_text)
+            action = _enrich_action(action, products_text, state.get("user_profile"), state.get("user_id"))
 
         agent_result = _format_agent_result("recommend", response, action)
         token_usage = _extract_token_usage(result.get("messages", []))
@@ -858,7 +880,13 @@ def run_agent_with_meta(user_input: str, history: List[dict], user_id: Optional[
         "user_profile": None,
     }
     with trace_run(user_id, user_input) as trace_run_id:
-        result = agent_graph.invoke(initial_state)
+        result = agent_graph.invoke(initial_state, config={"recursion_limit": 150})
+        try:
+            from trace import update_run_token
+            tu = result.get("token_usage") or {}
+            update_run_token(trace_run_id, tu.get("token_input"), tu.get("token_output"))
+        except Exception:
+            pass
     return {
         "reply": result["response"],
         "action": result.get("action"),

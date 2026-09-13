@@ -115,15 +115,34 @@
       </div>
       <div class="drawer-body" v-if="currentRun">
         <div class="run-meta">
+          <span class="meta-wide"><b>Run ID：</b><code class="run-id">{{ currentRun.run_id }}</code></span>
           <span><b>问题：</b>{{ currentRun.question }}</span>
           <span><b>路由：</b>{{ routeText(currentRun.route) }}</span>
           <span><b>状态：</b>{{ statusText(currentRun.status) }}</span>
           <span><b>总耗时：</b>{{ currentRun.latency_ms ?? '-' }}ms</span>
+          <span><b>Token：</b>{{ currentRun.token_input ?? 0 }} 入 / {{ currentRun.token_output ?? 0 }} 出</span>
+          <span><b>用户：</b>{{ currentRun.user_id ?? '-' }}</span>
           <span v-if="currentRun.error" class="error-text"><b>错误：</b>{{ currentRun.error }}</span>
         </div>
         <div class="chart-card" v-if="currentRun.nodes?.length">
-          <h3 class="card-title">Node 耗时瀑布图</h3>
-          <BaseChart :option="waterfallOption" height="320px" empty-text="暂无节点数据" />
+          <div class="waterfall-toolbar">
+            <h3 class="card-title">Node 耗时瀑布图</h3>
+            <div class="waterfall-actions" v-if="waterfallGroups.length > 1">
+              <button class="mini-btn" @click="expandAll">全部展开</button>
+              <button class="mini-btn" @click="collapseAll">全部折叠</button>
+            </div>
+          </div>
+          <BaseChart ref="waterfallChart" :option="waterfallOption" :height="waterfallHeight + 'px'" empty-text="暂无节点数据" />
+          <div class="round-chips" v-if="waterfallGroups.length > 1">
+            <span
+              v-for="(g, i) in waterfallGroups"
+              :key="i"
+              class="round-chip"
+              :class="{ collapsed: collapsedRounds.has(i), err: g.errors }"
+              @click="toggleRound(i)"
+              :title="'点击' + (collapsedRounds.has(i) ? '展开' : '折叠') + '第' + i + '轮'"
+            >第{{ i }}轮: {{ g.nodes.length }}节点/{{ g.totalMs }}ms</span>
+          </div>
         </div>
         <div class="section-card table-card" v-if="currentRun.nodes?.length">
           <h3 class="card-title">Node 明细</h3>
@@ -156,7 +175,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { fetchTraceRuns, fetchTraceRun, fetchTraceStats } from '@/api/trace.js'
 import { getAiUsage } from '@/api/dashboard.js'
 import BaseChart from '@/components/charts/BaseChart.vue'
@@ -198,12 +217,12 @@ const trendOption = computed(() => {
   const daily = stats.value?.daily_trend || []
   return {
     tooltip: { trigger: 'axis' },
-    legend: { top: 4, right: 12, data: ['Run 数', '平均耗时(ms)'], textStyle: { color: '#6b7280' } },
-    grid: { left: 16, right: 20, top: 40, bottom: 12, containLabel: true },
+    legend: { top: 0, right: 12, itemGap: 14, data: ['Run 数', '平均耗时(ms)'], textStyle: { color: '#6b7280' } },
+    grid: { left: 16, right: 20, top: 44, bottom: 12, containLabel: true },
     xAxis: { type: 'category', data: daily.map(d => (d.date || '').slice(5)), axisLine: { lineStyle: { color: '#e5e7eb' } }, axisLabel: { color: '#9ca3af' } },
     yAxis: [
-      { type: 'value', name: 'Run 数', splitLine: { lineStyle: { color: '#f0f0f0' } }, axisLabel: { color: '#9ca3af' } },
-      { type: 'value', name: '耗时', splitLine: { show: false }, axisLabel: { color: '#9ca3af' } },
+      { type: 'value', splitLine: { lineStyle: { color: '#f0f0f0' } }, axisLabel: { color: '#9ca3af' } },
+      { type: 'value', splitLine: { show: false }, axisLabel: { color: '#9ca3af' } },
     ],
     series: [
       { name: 'Run 数', type: 'bar', data: daily.map(d => d.count || 0), itemStyle: { color: '#3b82f6', borderRadius: [3, 3, 0, 0] } },
@@ -220,11 +239,13 @@ const statusOption = computed(() => {
   const colorMap = { ok: '#10b981', error: '#ef4444', running: '#f59e0b' }
   return {
     tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-    legend: { orient: 'vertical', right: 8, top: 'center', textStyle: { color: '#6b7280' } },
+    legend: { bottom: 0, left: 'center', itemWidth: 12, itemHeight: 12, itemGap: 12, textStyle: { color: '#6b7280' } },
     color: ['#10b981', '#ef4444', '#f59e0b', '#94a3b8'],
+    grid: { left: 8, right: 8, top: 8, bottom: 32 },
     series: [{
-      type: 'pie', radius: ['42%', '68%'], center: ['34%', '50%'],
-      label: { show: false },
+      type: 'pie', radius: ['40%', '60%'], center: ['50%', '42%'],
+      label: { show: true, formatter: '{b}\n{d}%', fontSize: 11, color: '#6b7280', lineHeight: 14 },
+      labelLine: { show: true, length: 12, length2: 8 },
       data: dist.filter(d => d.value > 0).map(d => ({
         name: statusText(d.name), value: d.value,
         itemStyle: { color: colorMap[d.name] || '#94a3b8' },
@@ -238,12 +259,12 @@ const tokenTrendOption = computed(() => {
   const trends = aiUsage.value?.trends || []
   return {
     tooltip: { trigger: 'axis' },
-    legend: { top: 4, right: 12, data: ['调用量', 'Token 消耗'], textStyle: { color: '#6b7280' } },
-    grid: { left: 16, right: 20, top: 40, bottom: 12, containLabel: true },
+    legend: { top: 0, right: 12, itemGap: 14, data: ['调用量', 'Token 消耗'], textStyle: { color: '#6b7280' } },
+    grid: { left: 16, right: 20, top: 44, bottom: 12, containLabel: true },
     xAxis: { type: 'category', data: trends.map(t => (t.date || '').slice(5)), axisLine: { lineStyle: { color: '#e5e7eb' } }, axisLabel: { color: '#9ca3af' } },
     yAxis: [
-      { type: 'value', name: '调用量', splitLine: { lineStyle: { color: '#f0f0f0' } }, axisLabel: { color: '#9ca3af' } },
-      { type: 'value', name: 'Token', splitLine: { show: false }, axisLabel: { color: '#9ca3af' } },
+      { type: 'value', splitLine: { lineStyle: { color: '#f0f0f0' } }, axisLabel: { color: '#9ca3af' } },
+      { type: 'value', splitLine: { show: false }, axisLabel: { color: '#9ca3af' } },
     ],
     series: [
       { name: '调用量', type: 'bar', data: trends.map(t => t.calls ?? 0), itemStyle: { color: '#6366f1', borderRadius: [3, 3, 0, 0] } },
@@ -260,10 +281,12 @@ const aiRouteOption = computed(() => {
   const colorMap = { recommend: '#3b82f6', analysis: '#9333ea', customer_service: '#c2410c', unknown: '#94a3b8' }
   return {
     tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-    legend: { orient: 'vertical', right: 8, top: 'center', textStyle: { color: '#6b7280' } },
+    legend: { bottom: 0, left: 'center', itemWidth: 12, itemHeight: 12, itemGap: 12, textStyle: { color: '#6b7280' } },
+    grid: { left: 8, right: 8, top: 8, bottom: 32 },
     series: [{
-      type: 'pie', radius: ['42%', '68%'], center: ['34%', '50%'],
-      label: { show: false },
+      type: 'pie', radius: ['40%', '60%'], center: ['50%', '42%'],
+      label: { show: true, formatter: '{b}\n{d}%', fontSize: 11, color: '#6b7280', lineHeight: 14 },
+      labelLine: { show: true, length: 12, length2: 8 },
       data: dist.filter(d => d.calls > 0).map(d => ({
         name: routeText(d.route), value: d.calls,
         itemStyle: { color: colorMap[d.route] || '#94a3b8' },
@@ -273,16 +296,98 @@ const aiRouteOption = computed(() => {
 })
 
 
+const waterfallChart = ref(null)
+
+let _stripePattern = null
+function stripePattern() {
+  if (_stripePattern) return _stripePattern
+  const c = document.createElement('canvas')
+  c.width = c.height = 6
+  const ctx = c.getContext('2d')
+  ctx.fillStyle = '#eef2f7'
+  ctx.fillRect(0, 0, 6, 6)
+  ctx.strokeStyle = '#aab3c5'
+  ctx.lineWidth = 1.5
+  ctx.beginPath()
+  ctx.moveTo(0, 6)
+  ctx.lineTo(6, 0)
+  ctx.stroke()
+  _stripePattern = { image: c, repeat: 'repeat' }
+  return _stripePattern
+}
+
+function groupNodes(nodes) {
+  const groups = []
+  let cur = null
+  for (const n of nodes) {
+    if (n.node_name === 'supervisor') {
+      if (cur) groups.push(cur)
+      cur = { nodes: [], totalMs: 0, errors: 0 }
+    }
+    if (!cur) cur = { nodes: [], totalMs: 0, errors: 0 }
+    cur.nodes.push(n)
+    cur.totalMs += n.latency_ms || 0
+    if (n.status === 'error') cur.errors += 1
+  }
+  if (cur) groups.push(cur)
+  return groups
+}
+
+const waterfallGroups = computed(() => groupNodes(currentRun.value?.nodes || []))
+const collapsedRounds = ref(new Set())
+
+function initCollapsed() {
+  const groups = waterfallGroups.value
+  const dense = (currentRun.value?.nodes?.length || 0) > 30
+  const s = new Set()
+  if (groups.length > 1 && dense) {
+    groups.forEach((_, i) => { if (i !== 0) s.add(i) })
+  }
+  collapsedRounds.value = s
+}
+
+function toggleRound(gi) {
+  const s = new Set(collapsedRounds.value)
+  if (s.has(gi)) s.delete(gi); else s.add(gi)
+  collapsedRounds.value = s
+}
+function collapseAll() {
+  const s = new Set()
+  waterfallGroups.value.forEach((_, i) => s.add(i))
+  collapsedRounds.value = s
+}
+function expandAll() {
+  collapsedRounds.value = new Set()
+}
+
+const waterfallRows = computed(() => {
+  const rows = []
+  waterfallGroups.value.forEach((g, gi) => {
+    if (collapsedRounds.value.has(gi)) {
+      rows.push({ kind: 'group', gi, label: `▶ 第${gi}轮 · ${g.nodes.length}节点`, value: g.totalMs, status: g.errors ? 'error' : 'ok' })
+    } else {
+      g.nodes.forEach(n => rows.push({ kind: 'node', gi, label: n.node_name, value: n.latency_ms || 0, status: n.status, raw: n }))
+    }
+  })
+  return rows
+})
+
+const waterfallHeight = computed(() => {
+  const n = waterfallRows.value.length
+  return Math.min(Math.max(n * 26, 320), 2000)
+})
+
 const waterfallOption = computed(() => {
-  const nodes = currentRun.value?.nodes || []
-  const labels = nodes.map(n => `${n.seq}. ${n.node_name}`)
+  const rows = waterfallRows.value
+  const labels = rows.map(r => r.label)
   return {
     tooltip: {
       trigger: 'axis',
       formatter: (params) => {
-        const p = params[0]
-        const n = nodes[p.dataIndex]
-        return `${n.node_name} (${n.node_type || '-'})<br/>耗时: ${n.latency_ms ?? '-'}ms<br/>状态: ${statusText(n.status)}`
+        const r = rows[params[0].dataIndex]
+        if (!r) return ''
+        if (r.kind === 'group') return `第${r.gi}轮 · 节点 ${waterfallGroups.value[r.gi]?.nodes.length ?? 0} 个 · 总耗时 ${r.value}ms`
+        return `${r.raw.node_name} (${r.raw.node_type || '-'})<br/>耗时: ${r.raw.latency_ms ?? '-'}ms<br/>状态: ${statusText(r.raw.status)}`
       },
     },
     grid: { left: 16, right: 24, top: 16, bottom: 12, containLabel: true },
@@ -290,14 +395,40 @@ const waterfallOption = computed(() => {
     yAxis: { type: 'category', data: labels, inverse: true, axisLabel: { color: '#6b7280' } },
     series: [{
       type: 'bar',
-      data: nodes.map(n => ({
-        value: n.latency_ms ?? 0,
-        itemStyle: { color: n.status === 'error' ? '#ef4444' : '#10b981', borderRadius: [0, 3, 3, 0] },
+      barMaxWidth: 14,
+      data: rows.map(r => ({
+        value: r.value,
+        itemStyle: {
+          color: r.kind === 'group'
+            ? (r.status === 'error' ? '#fca5a5' : stripePattern())
+            : (r.status === 'error' ? '#ef4444' : '#10b981'),
+          borderColor: r.kind === 'group' ? (r.status === 'error' ? '#ef4444' : '#aab3c5') : undefined,
+          borderWidth: r.kind === 'group' ? 1 : 0,
+          borderRadius: r.kind === 'group' ? 2 : [0, 3, 3, 0],
+          opacity: r.kind === 'group' ? 0.85 : 1,
+        },
       })),
-      label: { show: true, position: 'right', formatter: (p) => p.value + 'ms', color: '#6b7280', fontSize: 11 },
+      label: {
+        show: rows.length <= 40,
+        position: 'right',
+        distance: 4,
+        formatter: (p) => p.value + 'ms',
+        color: '#6b7280', fontSize: 10,
+      },
     }],
   }
 })
+
+let waterfallClickAttached = false
+function attachWaterfallClick() {
+  const inst = waterfallChart.value?.getInstance?.()
+  if (!inst || waterfallClickAttached) return
+  waterfallClickAttached = true
+  inst.on('click', (params) => {
+    const r = waterfallRows.value[params.dataIndex]
+    if (r && typeof r.gi === 'number') toggleRound(r.gi)
+  })
+}
 
 function routeText(r) {
   return { recommend: '推荐', analysis: '分析', customer_service: '客服' }[r] || (r || '-')
@@ -378,6 +509,8 @@ async function openDetail(runId) {
   try {
     const res = await fetchTraceRun(runId)
     currentRun.value = res
+    initCollapsed()
+    nextTick(() => attachWaterfallClick())
   } catch (e) {
     console.error('加载详情失败:', e)
   } finally {
@@ -423,8 +556,14 @@ onMounted(() => {
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-.q-col { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.io-col { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: monospace; font-size: 12px; color: var(--text-color-tertiary); }
+.q-col { max-width: 320px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.io-col { max-width: 220px; min-width: 0; overflow: hidden; font-family: monospace; font-size: 12px; color: var(--text-color-tertiary); word-break: break-all; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+
+.trace-dashboard .table-card { overflow-x: auto; }
+.trace-dashboard .data-table { min-width: 720px; }
+.run-meta span { min-width: 0; overflow-wrap: anywhere; }
+.meta-wide { grid-column: 1 / -1; }
+.run-id { font-family: monospace; font-size: 12px; color: var(--text-color-secondary); word-break: break-all; user-select: all; }
 
 
 .status-ok { background: rgba(16, 185, 129, 0.12); color: var(--series-positive); }
@@ -467,8 +606,8 @@ onMounted(() => {
   position: fixed;
   top: 0;
   right: 0;
-  width: 64%;
-  max-width: 900px;
+  width: 78%;
+  max-width: 1120px;
   height: 100%;
   background: var(--bg-color-secondary);
   box-shadow: var(--shadow-elevated);
@@ -507,6 +646,7 @@ onMounted(() => {
   flex-direction: column;
   gap: 14px;
 }
+.drawer-body > * { flex-shrink: 0; }
 .run-meta {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
@@ -520,11 +660,51 @@ onMounted(() => {
 }
 .run-meta b { color: var(--text-color-primary); font-weight: 600; }
 
+.ai-usage-section,
+.ai-usage-section > *,
+.trace-dashboard .charts-grid,
+.trace-dashboard .metrics-grid,
+.trace-dashboard .chart-card { min-width: 0; }
+.trace-dashboard .chart-card { max-width: 100%; overflow: hidden; }
+
+.waterfall-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.waterfall-toolbar .card-title { margin: 0; }
+.waterfall-actions { display: flex; gap: 8px; }
+.mini-btn {
+  padding: 4px 10px;
+  font-size: 12px;
+  border: 1px solid var(--border-color-primary);
+  background: var(--card-bg);
+  color: var(--text-color-secondary);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.mini-btn:hover { border-color: var(--primary-color); color: var(--primary-color); }
+.round-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.round-chip {
+  padding: 3px 9px;
+  font-size: 12px;
+  border-radius: 12px;
+  cursor: pointer;
+  background: var(--bg-color-secondary);
+  color: var(--text-color-secondary);
+  border: 1px solid var(--border-color-primary);
+  transition: all 0.2s ease;
+}
+.round-chip:hover { border-color: var(--primary-color); color: var(--primary-color); }
+.round-chip.collapsed { opacity: 0.55; text-decoration: line-through; }
+.round-chip.err { color: var(--series-negative); border-color: rgba(239, 68, 68, 0.5); }
+
 @media (max-width: 1200px) {
   .charts-grid { grid-template-columns: 1fr; }
   .run-meta { grid-template-columns: 1fr; }
 }
-@media (max-width: 768px) {
+@media (max-width: 992px) {
+  .trace-dashboard .metrics-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 576px) {
+  .trace-dashboard .metrics-grid { grid-template-columns: 1fr; }
   .drawer { width: 100%; }
 }
 </style>
